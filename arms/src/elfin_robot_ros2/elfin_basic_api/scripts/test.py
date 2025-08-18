@@ -17,7 +17,8 @@ class test(object):
     def __init__(self):
         rclpy.init(args=None)
         self.node = Node('test')
-        self.publisher_joint = self.node.create_publisher(JointState, '/joint_goal', 1)
+        # self.publisher_joint = self.node.create_publisher(JointState, '/joint_goal', 1)
+        self.publisher_joint = self.node.create_publisher(JointState, '/joint_states', rclpy.qos.QoSProfile(durability=rclpy.qos.QoSDurabilityPolicy.TRANSIENT_LOCAL, depth=10, reliability=rclpy.qos.QoSReliabilityPolicy.RELIABLE))
         self.publisher_cart = self.node.create_publisher(PoseStamped,'/cart_goal', 1)
         self.publisher_cart_goal = self.node.create_publisher(PoseArray,'/cart_path_goal',1)
         self.trajectory_cmd = self.node.create_publisher(JointTrajectory,'/elfin_arm_controller/joint_trajectory',1)
@@ -119,6 +120,8 @@ class test(object):
 if __name__ == '__main__':
     pub_test = test()
     # pub_test.function_pub_cart()
-    pub_test.function_pub_cart_path()
+    # pub_test.function_pub_cart_path()
+    pub_test.function_pub_joints()
+    # pub_test.function_pub_trajectory()
     time.sleep(5)
     rclpy.spin(pub_test.node)

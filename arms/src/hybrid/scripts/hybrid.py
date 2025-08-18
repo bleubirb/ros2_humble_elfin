@@ -28,7 +28,6 @@ OUTSOURCE_IP = "127.0.0.1"
 
 class PNS_Driver:
     def __init__(self, node, ip, port):
-        rclpy.init()
         self.node = node
         self.gripper = OnRobotRG2FT(ip, port)
         self.state_pub = node.create_publisher(RG2FTState, "state", 1)
@@ -306,15 +305,11 @@ class PNS_Driver:
 
 class CmdMove(object):
     def __init__(self, node):
-        rclpy.init()
         self.node = node
-        self.joints_sub = node.create_subscription(JointState, "/elfin_arm_controller/state/", self.joints_callback, 1)
-        # self.joints_pub = node.create_publisher(JointState, "elfin_basic_api/joint_goal", 1)
-        # self.cart_pub = node.create_publisher(PoseStamped, "elfin_basic_api/cart_goal", 1)
-        # self.cart_path_pub = node.create_publisher(PoseArray, "elfin_basic_api/cart_path_goal", 1)
-        self.joints_pub = node.create_publisher(JointState, "/joint_goal", 1)
-        self.cart_pub = node.create_publisher(PoseStamped, "/cart_goal", 1)
-        self.cart_path_pub = node.create_publisher(PoseArray, "/cart_path_goal", 1)
+        self.joints_sub = node.create_subscription(JointState, "/elfin_arm_controller/controller_state", self.joints_callback, 1)
+        self.joints_pub = node.create_publisher(JointState, "joint_goal", 1)
+        # self.cart_pub = node.create_publisher(PoseStamped, "/cart_goal", 1)
+        # self.cart_path_pub = node.create_publisher(PoseArray, "/cart_path_goal", 1)
         self.ompl_planning_service = node.create_client(GetMotionPlan, "/ompl_planning_service")
 
         self.joint_min_limits = [-3.14, -2.04, -2.61, -3.14, -2.56, -3.14]
@@ -406,18 +401,18 @@ if __name__ == "__main__":
     GRIP = 1
 
     actions = [
-        (GRIP, 0),
+        # (GRIP, 0),
         (MOVE, None, None),
         (MOVE, [-0.100, 0.520, 0.400], [-90, -112, 0]),
         (MOVE, [-0.100, 0.620, 0.400], [-90, -112, 0]),
         # (GRIP, 1), # berry
-        (GRIP, 3), # ball
+        # (GRIP, 3), # ball
         (MOVE, [-0.100, 0.620, 0.300], [-90, -112, 0]),
-        (GRIP, 1),
+        # (GRIP, 1),
         (MOVE, [-0.100, 0.520, 0.300], [-90, -112, 0]),
         (MOVE, [-0.300, 0, 0.350], [-179.5, 0, -179.5]),
         (MOVE, [-0.300, 0, 0.200], [-179.5, 0, -179.5]),
-        (GRIP, 0),
+        # (GRIP, 0),
         (MOVE, [-0.300, 0, 0.350], [-179.5, 0, -179.5]),
         (MOVE, None, None)
     ]
