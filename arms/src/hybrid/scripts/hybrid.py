@@ -209,14 +209,16 @@ class PNS_Driver:
                 if contact:
                     if not self.done:
                         if force_avg > 0:
-                            k = (desired_force - force_avg) / (cmd.target_width - width)
-                            self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
-                        else:
-                            k = None
+                            compression = diameter_approx - width
+                            if compression != 0:
+                                k = (desired_force - force_avg) / compression
+                                self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
+                            else:
+                                k = None
                 # if k is valid, adjust target width to achieve desired force
                 if contact and force_avg > 0 and 'k' in locals() and k is not None:
                     # hooke's law: F = k * (x0 - x), solve for x0 (cmd.target_width)
-                    cmd.target_width = int(width + (desired_force - force_avg) / k)
+                    cmd.target_width = int(diameter_approx + (desired_force - force_avg) / k)
 
                 if q != HOLD:
                     reached_hold_time = float("inf")
