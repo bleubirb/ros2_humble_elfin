@@ -191,6 +191,9 @@ class PNS_Driver:
                     q = TIGHTEN
                     contact = False
                 else:
+                    contact = True
+                    # record current width
+                    diameter_approx = state.actual_gripper_width
                     if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (force_error <= (DELTA1)):
                         reached_hold_time = time.time()
                         q = HOLD
@@ -202,6 +205,19 @@ class PNS_Driver:
                         reached_hold_time = time.time()
                         q = HOLD
             
+                # for parameter estimation of spring constant (remove if no estimation)
+                if contact:
+                    if not self.done:
+                        if force_avg > 0:
+                            k = (desired_force - force_avg) / (cmd.target_width - width)
+                            self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
+                        else:
+                            k = None
+                # if k is valid, adjust target width to achieve desired force
+                if contact and force_avg > 0 and 'k' in locals() and k is not None:
+                    # hooke's law: F = k * (x0 - x), solve for x0 (cmd.target_width)
+                    cmd.target_width = int(width + (desired_force - force_avg) / k)
+
                 if q != HOLD:
                     reached_hold_time = float("inf")
         
@@ -223,6 +239,7 @@ class PNS_Driver:
                     cmd.target_width = 0
                 elif cmd.target_width > 1000:
                     cmd.target_width = 1000
+
 
             if calibrated:
                 time_data.append(time.time())
