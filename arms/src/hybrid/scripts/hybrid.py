@@ -126,6 +126,8 @@ class PNS_Driver:
         l_force_drift = 0
         r_force_drift = 0
 
+        first_contact = False
+
         loop_counter = 0
         while rclpy.ok() and not self.shutdown:
             state = self.gripper.readState()
@@ -192,8 +194,12 @@ class PNS_Driver:
                     contact = False
                 else:
                     contact = True
-                    # record current width
-                    diameter_approx = state.actual_gripper_width
+
+                    if not first_contact:
+                        # record current width
+                        diameter_approx = state.actual_gripper_width
+                        first_contact = True
+                        
                     if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (force_error <= (DELTA1)):
                         reached_hold_time = time.time()
                         q = HOLD
