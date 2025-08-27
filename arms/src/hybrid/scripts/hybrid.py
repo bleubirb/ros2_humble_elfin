@@ -86,6 +86,7 @@ class PNS_Driver:
 
         MOVING_AVG_LEN_FORCE = 100
         MOVING_AVG_LEN_PROX = 100
+        MOVING_AVG_LEN_K = 100
 
         SLOW_FORCE_BOUND = 0.5
 
@@ -109,6 +110,7 @@ class PNS_Driver:
         reached_hold_time = float("inf")
         start_time = float("inf")
 
+        k_filter = []
         time_data = []
         hold_time_data = []
         force_data = []
@@ -212,13 +214,20 @@ class PNS_Driver:
                             compression = diameter_approx - width
                             if compression != 0:
                                 k = (desired_force - force_avg) / compression
+                                # putting into moving average filter to make more readable
+                                k_filter.append(k)
+                                if len(k_filter) > MOVING_AVG_LEN_K:
+                                    k_filter.pop(0)
+                                k = mean(k_filter)
                                 self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
                             else:
                                 k = None
                 # if k is valid, adjust target width to achieve desired force
-                if contact and force_avg > 0 and 'k' in locals() and k is not None:
+                if contact and force_avg > 0 and k is not None:
                     # hooke's law: F = k * (x0 - x), solve for x0 (cmd.target_width)
-                    cmd.target_width = int(diameter_approx + (desired_force - force_avg) / k)
+                    # x is diameter_approx
+                    test = diameter_approx + (force_avg / k)
+                    self.node.get_logger().info(f"Hooke's law target width: {test} mm and current width: {width} mm")
 
                 if q != HOLD:
                     reached_hold_time = float("inf")
@@ -425,9 +434,9 @@ if __name__ == "__main__":
         # (MOVE, [-0.100, 0.520, 0.400], [-90, -112, 0]),
         # (MOVE, [-0.100, 0.620, 0.400], [-90, -112, 0]),
         (GRIP, 1), # berry
-        (GRIP, 3), # ball
+        # (GRIP, 3), # ball
         # (MOVE, [-0.100, 0.620, 0.300], [-90, -112, 0]),
-        (GRIP, 1),
+        # (GRIP, 1),
         # (MOVE, [-0.100, 0.520, 0.300], [-90, -112, 0]),
         # (MOVE, [-0.300, 0, 0.350], [-179.5, 0, -179.5]),
         # (MOVE, [-0.300, 0, 0.200], [-179.5, 0, -179.5]),
