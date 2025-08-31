@@ -20,7 +20,7 @@ from moveit_msgs.srv import GetMotionPlan
 # from moveit_msgs.msg import JointConstraint, MotionPlanResponse
 from sensor_msgs.msg import JointState
 import requests
-import move_solver as ms
+# import move_solver as ms
 
 OUTSOURCE_IP = "127.0.0.1" # should not need with new computer, adds latency for requests
 # implement move_solver
@@ -214,7 +214,7 @@ class PNS_Driver:
                                 if len(k_filter) > MOVING_AVG_LEN_K:
                                     k_filter.pop(0)
                                 k = mean(k_filter)
-                                self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
+                                # self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
                             else:
                                 k = None
                 # if k is valid, adjust target width to achieve desired force
@@ -222,7 +222,7 @@ class PNS_Driver:
                     # hooke's law: F = k * (x0 - x), solve for x0 (cmd.target_width)
                     # x is diameter_approx
                     test = diameter_approx + (force_avg / k)
-                    self.node.get_logger().info(f"Hooke's law target width: {test} mm and current width: {width} mm")
+                    self.node.get_logger().info(f"target width: {test} mm and current width: {width} mm, current force: {force_avg}")
 
                 if q != HOLD:
                     reached_hold_time = float("inf")
