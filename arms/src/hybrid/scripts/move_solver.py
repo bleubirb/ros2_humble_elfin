@@ -101,11 +101,11 @@ for i in range(6):
 # Combine Jacobian components
 J = sp.Matrix.vstack(Jv, Jw)
 
-Kp_pos = 0.4
-Kd_pos = 0.1
+Kp_pos = 0.4 # proportional gain for position
+Kd_pos = 0.1 # derivative gain for position
 
-Kp_rot = np.deg2rad(10.0)
-Kd_rot = np.deg2rad(0.05)
+Kp_rot = np.deg2rad(10.0) # rotational proportional gain
+Kd_rot = np.deg2rad(0.05) # rotational derivative gain
 
 pos_tolerance = 1e-6
 rot_tolerance = 1e-3
@@ -139,13 +139,17 @@ def check_pose(drag_joints, target_pose, target_orientation, retry=False):
         )
         final_p = np.round(transform[:3, 3], 4)
         print(f"Position {i}: {final_p}")
-        if final_p[0] > 0.48 or final_p[2] < 0.1:
+        if final_p[0] > 0.48 or final_p[2] < 0.1: # compare to workspace limits (i.e., floor and wall)
             print(f"Position {i} is invalid")
             if i >= 3:
                 print("Target position/orientation is invalid")
                 return False, drag_joints
             elif i >= 1 and not retry:
                 print("Trying to fix via the other triangle solution")
+                # Adjust joints 2, 3, and 5 to switch to the other elbow configuration
+                # joint 2 = joint 2 - joint 3
+                # joint 3 = -joint 3
+                # joint 5 = joint 5 + joint 3
                 drag_joints[1] -= drag_joints[2]
                 drag_joints[4] += drag_joints[2]
                 drag_joints[2] *= -1
@@ -214,7 +218,7 @@ def compute(target_pose, target_orientation, starting_joint_state, retry=False):
                 ]
             ),
             dtype=float,
-        ).flatten()
+        ).flatten() # flatten to convert from 3x1 matrix to 1D array
         current_orientation = np.array(
             R.subs(
                 [
@@ -232,14 +236,17 @@ def compute(target_pose, target_orientation, starting_joint_state, retry=False):
         position_error = target_pose - current_position
         R_error = target_orientation_matrix @ current_orientation.T
 
-        theta_error = np.arccos(np.clip((np.trace(R_error) - 1) / 2, -1, 1))
+        theta_error = np.arccos(np.clip((np.trace(R_error) - 1) / 2, -1, 1)) # angle error
+        # clipping to avoid numerical issues outside the valid range of arccos
+        # calculates the angle of rotation needed to align the current orientation with the target orientation
 
         # Store the position error
         position_errors.append(np.linalg.norm(position_error))
         orientation_errors.append(theta_error)
 
         if abs(theta_error) > rot_tolerance:
-            u_error = (1 / (2 * np.sin(theta_error))) * np.array(
+            # Orientation error (angle-axis representation) - avoid singularities
+            u_error = (1 / (2 * np.sin(theta_error))) * np.array( # u_error is the unit rotation axis for the orientation error
                 [
                     R_error[2][1] - R_error[1][2],
                     R_error[0][2] - R_error[2][0],
@@ -248,16 +255,16 @@ def compute(target_pose, target_orientation, starting_joint_state, retry=False):
             )
 
             if np.linalg.norm(u_error) > rot_tolerance:
-                u_error = u_error / np.linalg.norm(u_error)
-            orientation_error = theta_error * u_error
+                u_error = u_error / np.linalg.norm(u_error) # normalize to unit vector
+            orientation_error = theta_error * u_error # orientation error vector
         else:
             orientation_error = np.zeros(3)
 
         control_outputs = np.zeros(6)
         for i in range(3):
-            control_outputs[i] = Kp_pos * position_error[i]
+            control_outputs[i] = Kp_pos * position_error[i] # outputs [x, y, z, 0, 0, 0]
         for i in range(3):
-            control_outputs[i + 3] = Kp_rot * orientation_error[i]
+            control_outputs[i + 3] = Kp_rot * orientation_error[i] # outputs [x, y, z, rx, ry, rz]
 
         J_val = np.array(
             J.subs(

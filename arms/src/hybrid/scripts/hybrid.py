@@ -12,19 +12,18 @@ import rclpy
 import rclpy.node
 from onrobot_rg2ft_control.OnRobotRG2FT import OnRobotRG2FT
 from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
-# from onrobot_rg2ft_msgs.srv import SetProximityOffsets, SetProximityOffsetsResponse
-# from std_srvs.srv import SetBool, SetBoolResponse, Trigger, TriggerResponse
-from geometry_msgs.msg import Wrench, PoseStamped, PoseArray, Pose
+# from geometry_msgs.msg import Wrench, PoseStamped, PoseArray, Pose
 import threading
 from sensor_msgs.msg import JointState
-from control_msgs.msg import JointTrajectoryControllerState
+# from control_msgs.msg import JointTrajectoryControllerState
 from moveit_msgs.srv import GetMotionPlan
-from moveit_msgs.msg import JointConstraint, MotionPlanResponse
+# from moveit_msgs.msg import JointConstraint, MotionPlanResponse
 from sensor_msgs.msg import JointState
-# import tf.transformations as tr
 import requests
+import move_solver as ms
 
-OUTSOURCE_IP = "127.0.0.1"
+OUTSOURCE_IP = "127.0.0.1" # should not need with new computer, adds latency for requests
+# implement move_solver
 
 class PNS_Driver:
     def __init__(self, node, ip, port):
@@ -32,10 +31,6 @@ class PNS_Driver:
         self.gripper = OnRobotRG2FT(ip, port)
         self.state_pub = node.create_publisher(RG2FTState, "state", 1)
         self.cmd_sub = node.create_subscription(RG2FTCommand, "command", self.gripper.writeCommand, 1)
-        # self.restart_srv = node.create_service(Trigger, "restart", self.restart_cb)
-        # self.zero_srv = node.create_service(SetBool, "zero_force_torque", self.zero_force_torque_cb)
-        # self.set_prox_offset_srv = node.create_service(SetProximityOffsets, "set_proximity_offsets", self.prox_offsets_cb)
-
         self.fd = 0
         self.done = True
         self.shutdown = False
@@ -61,14 +56,14 @@ class PNS_Driver:
         LOOP_FREQ = 1000 # Hz
         PERIOD = 1.0 / LOOP_FREQ
         force_avg = 0
-        # movement = 200 # for berry
+        # movement = 200 # for berry -> should not need this either, test without
         movement = 300 # for ball
         q = 0
         desired_force = 0
         last_prox = 1000
 
         MIN_HOLD_TIME = 5 # seconds -> adjust for altering data collection amount
-        MAX_GRIP_TIME = 120 # hold for 120 seconds
+        MAX_GRIP_TIME = 1800 # hold for 30 minutes -> testing temperature sensor drift
 
         OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
@@ -80,7 +75,7 @@ class PNS_Driver:
         LOOSEN_SLOW = -1
         LOOSEN = -2
 
-        # proximity redundancy
+        # proximity redundancy -> should not need this anymore, test without
         FAR = 500
         CLOSE = 300 
 
@@ -314,30 +309,11 @@ class PNS_Driver:
         f.close()
         self.node.get_logger().info(f"Data saved to data/hybrid_gripper_{f_idx}.csv")
 
-    # def restart_cb(self, req):
-    #     rclpy.loginfo("Restarting the power cycle of the gripper.")
-    #     self.gripper.restartPowerCycle()
-    #     rclpy.sleep(1)
-    #     return TriggerResponse(success=None, message=None)
-
-    # def zero_force_torque_cb(self, req):
-    #     rclpy.loginfo("Zeroing force and torque.")
-    #     self.gripper.zeroForceTorque(req.data)
-    #     rclpy.sleep(1)
-    #     return TriggerResponse(success=None, message=None)
-
-    # def prox_offsets_cb(self, req):
-    #     rclpy.loginfo("Setting proximity offsets.")
-    #     self.gripper.setProximityOffsets(req.ProximityOffsetL, req.ProximityOffsetR)
-    #     return SetProximityOffsetsResponse(success=None, message=None)
-
 class CmdMove(object):
     def __init__(self, node):
         self.node = node
         self.joints_sub = node.create_subscription(JointState, "/elfin_arm_controller/controller_state", self.joints_callback, 1)
         self.joints_pub = node.create_publisher(JointState, "joint_goal", 1)
-        # self.cart_pub = node.create_publisher(PoseStamped, "/cart_goal", 1)
-        # self.cart_path_pub = node.create_publisher(PoseArray, "/cart_path_goal", 1)
         self.ompl_planning_service = node.create_client(GetMotionPlan, "/ompl_planning_service")
 
         self.joint_min_limits = [-3.14, -2.04, -2.61, -3.14, -2.56, -3.14]
