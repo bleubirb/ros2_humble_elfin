@@ -203,49 +203,54 @@ class PNS_Driver:
                         q = HOLD
             
                 # for parameter estimation of spring constant (remove if no estimation)
-                if contact:
-                    if not self.done:
-                        if force_avg > 0:
-                            compression = diameter_approx - width
-                            if compression != 0:
-                                k = (desired_force - force_avg) / compression
-                                # putting into moving average filter to make more readable
-                                k_filter.append(k)
-                                if len(k_filter) > MOVING_AVG_LEN_K:
-                                    k_filter.pop(0)
-                                k = mean(k_filter)
-                                # self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
-                            else:
-                                k = None
-                # if k is valid, adjust target width to achieve desired force
-                if contact and force_avg > 0 and k is not None:
-                    # hooke's law: F = k * (x0 - x), solve for x0 (cmd.target_width)
-                    # x is diameter_approx
-                    test = diameter_approx + (force_avg / k)
-                    self.node.get_logger().info(f"target width: {test} mm and current width: {width} mm, current force: {force_avg}")
+                # if contact:
+                #     if not self.done:
+                #         if force_avg > 0:
+                #             compression = diameter_approx - width
+                #             if compression != 0:
+                #                 k = (desired_force - force_avg) / compression
+                #                 # putting into moving average filter to make more readable
+                #                 k_filter.append(k)
+                #                 if len(k_filter) > MOVING_AVG_LEN_K:
+                #                     k_filter.pop(0)
+                #                 k = mean(k_filter)
+                #                 # self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
+                #             else:
+                #                 k = None
+                # # if k is valid, adjust target width to achieve desired force
+                # if contact and force_avg > 0 and k is not None:
+                #     # hooke's law: F = k * (x0 - x), solve for x0 (cmd.target_width)
+                #     # x is diameter_approx
+                #     test = diameter_approx + (force_avg / k)
+                #     self.node.get_logger().info(f"target width: {test} mm and current width: {width} mm, current force: {force_avg}, q state: {q}")
+                    
 
                 if q != HOLD:
                     reached_hold_time = float("inf")
         
                 if q == HOLD:
-                    # cmd.target_width -= 0.0001
+                    # No adjustment needed, hold current width
                     pass
                 elif q == TIGHTEN:  # move smaller
-                    cmd.target_width = int(cmd.target_width - SPEED_NORMAL)
+                    cmd.target_width = cmd.target_width - SPEED_NORMAL
+                    self.node.get_logger().info(f"Tightening: {cmd.target_width}")
                 elif q == LOOSEN:  # move bigger
-                    cmd.target_width = int(cmd.target_width + SPEED_NORMAL)
+                    cmd.target_width = cmd.target_width + SPEED_NORMAL
+                    self.node.get_logger().info(f"Loosening: {cmd.target_width}")
                 elif q == TIGHTEN_FAST:
-                    cmd.target_width = int(cmd.target_width - SPEED_FAST)
+                    cmd.target_width = cmd.target_width - SPEED_FAST
+                    self.node.get_logger().info(f"Tightening fast: {cmd.target_width}")
                 elif q == LOOSEN_SLOW:
-                    cmd.target_width = int(cmd.target_width + SPEED_SLOW)
+                    cmd.target_width = cmd.target_width + SPEED_SLOW
                 elif q == TIGHTEN_SLOW:
-                    cmd.target_width = int(cmd.target_width - SPEED_SLOW)
+                    cmd.target_width = cmd.target_width - SPEED_SLOW
                 
                 if cmd.target_width < 0:
                     cmd.target_width = 0
                 elif cmd.target_width > 1000:
                     cmd.target_width = 1000
 
+                self.node.get_logger().info(f"target width: {cmd.target_width}, current force: {force_avg}, q state: {q}")
 
             if calibrated:
                 time_data.append(time.time())
@@ -409,7 +414,7 @@ if __name__ == "__main__":
         # (MOVE, None, None),
         # (MOVE, [-0.100, 0.520, 0.400], [-90, -112, 0]),
         # (MOVE, [-0.100, 0.620, 0.400], [-90, -112, 0]),
-        (GRIP, 1), # berry
+        (GRIP, 3), # berry
         # (GRIP, 3), # ball
         # (MOVE, [-0.100, 0.620, 0.300], [-90, -112, 0]),
         # (GRIP, 1),
