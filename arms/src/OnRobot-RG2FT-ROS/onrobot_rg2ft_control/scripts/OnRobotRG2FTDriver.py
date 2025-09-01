@@ -19,12 +19,12 @@ class OnRobotRG2FTDriver(Node):
 
         self.gripper = OnRobotRG2FT(ip, port)
 
-    # Topics align with action server defaults
-    self.state_pub = self.create_publisher(RG2FTState, 'gripper/states', 10)
-    self.left_wrench_pub = self.create_publisher(Wrench, 'left_wrench', 10)
-    self.right_wrench_pub = self.create_publisher(Wrench, 'right_wrench', 10)
+        # Topics align with action server defaults
+        self.state_pub = self.create_publisher(RG2FTState, 'gripper/states', 10)
+        self.left_wrench_pub = self.create_publisher(Wrench, 'left_wrench', 10)
+        self.right_wrench_pub = self.create_publisher(Wrench, 'right_wrench', 10)
 
-    self.cmd_sub = self.create_subscription(RG2FTCommand, 'gripper/ctrl', self.gripper.write_command, 10)
+        self.cmd_sub = self.create_subscription(RG2FTCommand, 'gripper/ctrl', self.gripper.write_command, 10)
 
         self.restart_srv = self.create_service(Trigger, 'restart', self.restart_cb)
         self.zero_srv = self.create_service(SetBool, 'zero_force_torque', self.zero_force_torque_cb)

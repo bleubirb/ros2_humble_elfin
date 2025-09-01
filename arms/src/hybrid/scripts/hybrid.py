@@ -35,6 +35,10 @@ class PNS_Driver:
         self.done = True
         self.shutdown = False
 
+        # self.enable_drift_comp = node.declare_parameter("enable_drift_comp", True).get_parameter_value().bool_value
+        # self.enable_online_rebaselining = node.declare_parameter("enable_online_rebaselining", True).get_parameter_value().bool_value
+        # self.rebaselining_alpha = node.declare_parameter("rebaselining_alpha", 1e-3).get_parameter_value().double_value
+
         self.thread = threading.Thread(target=self.loop)
         self.thread.start()
 
@@ -53,7 +57,7 @@ class PNS_Driver:
         self.thread.join()
 
     def loop(self):
-        LOOP_FREQ = 1000 # Hz
+        LOOP_FREQ = 100 # Hz
         PERIOD = 1.0 / LOOP_FREQ
         force_avg = 0
         # movement = 200 # for berry -> should not need this either, test without
@@ -62,8 +66,8 @@ class PNS_Driver:
         desired_force = 0
         last_prox = 1000
 
-        MIN_HOLD_TIME = 5 # seconds -> adjust for altering data collection amount
-        MAX_GRIP_TIME = 1800 # hold for 30 minutes -> testing temperature sensor drift
+        MIN_HOLD_TIME = 1800 # hold for 30 minutes -> testing temperature sensor drift
+        MAX_GRIP_TIME = 1800  # seconds -> adjust for altering data collection amount
 
         OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
@@ -89,9 +93,9 @@ class PNS_Driver:
         DELTA2 = 0.3
         DELTA1 = 0.1
 
-        SPEED_FAST = 0.5
-        SPEED_NORMAL = 0.05 * 2
-        SPEED_SLOW = 0.005 * 2
+        SPEED_FAST = 1.0
+        SPEED_NORMAL = 0.02
+        SPEED_SLOW = 0.002
 
         OPEN_HOLD_TOLERANCE = 5
 
@@ -114,27 +118,32 @@ class PNS_Driver:
         width_data = []
         cmd_width_data = []
         prox_data = []
+        raw_fz_l_data = []
+        raw_fz_r_data = []
 
-        CALIBRATION_TIME = 10 # seconds
+        CALIBRATION_TIME = 60 # seconds
 
         calibrated = False
-        l_force_bias = 0
-        r_force_bias = 0
-        l_force_drift = 0
-        r_force_drift = 0
+        l_force_bias = 0.0
+        r_force_bias = 0.0
+        l_force_drift = 0.0   # per loop increment
+        r_force_drift = 0.0   # per loop increment
+        # baseline_loop_counter = 0  # loop index at last calibration/rebaseline
+
+        tmp_width = 0
 
         loop_counter = 0
         while rclpy.ok() and not self.shutdown:
+            loop_start_time = time.time()
             state = self.gripper.readState()
 
-            
             if self.fd != desired_force:
                 desired_force = self.fd
                 reached_hold_time = float("inf")
                 start_time = time.time()
 
             cmd = RG2FTCommand()
-            cmd.target_width = last_target # mm
+            tmp_width = last_target # mm
             cmd.target_force = movement # target force is how aggressive the gripper moves, NOT the actual force applied
             cmd.control = 1
 
@@ -151,8 +160,8 @@ class PNS_Driver:
             ProxR = mean(prox_r_range)
             width = mean(width_range)
 
-            if cmd.target_width == 0:
-                cmd.target_width = int(max(0, min(65535, round(width))))
+            # if cmd.target_width == 0:
+            #     cmd.target_width = int(max(0, min(65535, round(width))))
 
             ProxAvg = (ProxL + ProxR) / 2 # divide by two due to width between two fingers (find midpoint)
 
@@ -163,34 +172,46 @@ class PNS_Driver:
 
             last_prox = ProxAvg
 
-            l_force = abs(state.fz_l) - l_force_bias - l_force_drift * loop_counter
-            r_force = abs(state.fz_r) - r_force_bias - r_force_drift * loop_counter
+            # Raw force readings
+            l_force_raw = abs(state.fz_l)
+            r_force_raw = abs(state.fz_r)
+
+            # if calibrated and self.enable_drift_comp:
+            #     loops_since_baseline = max(0, loop_counter - baseline_loop_counter)
+            #     l_force = l_force_raw - l_force_bias - l_force_drift * loops_since_baseline
+            #     r_force = r_force_raw - r_force_bias - r_force_drift * loops_since_baseline
+            # else:
+            #     l_force = l_force_raw
+            #     r_force = r_force_raw
+
+            l_force = l_force_raw - l_force_bias - l_force_drift * loop_counter
+            r_force = r_force_raw - r_force_bias - r_force_drift * loop_counter
 
             force = (l_force + r_force) / 2 / 10
             
-            force_error = desired_force - force_avg
-
             force_range.append(force)
             if len(force_range) > MOVING_AVG_LEN_FORCE:
                 force_range.pop(0)
             force_avg = mean(force_range)
 
+            force_error = desired_force - force_avg
+
             if desired_force == 0:
-                cmd.target_width = OPEN_WIDTH
+                tmp_width = OPEN_WIDTH
                 q = HOLD
-                if abs(width - cmd.target_width) < OPEN_HOLD_TOLERANCE:
+                if abs(width - tmp_width) < OPEN_HOLD_TOLERANCE:
                     reached_hold_time = min(reached_hold_time, time.time())
             else:
                 if ProxAvg > FAR and force_avg <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2:
                     q = TIGHTEN_FAST
-                    contact = False
+                    # contact = False
                 elif ProxAvg < FAR and ProxAvg > CLOSE and force_avg <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2:
                     q = TIGHTEN
-                    contact = False
+                    # contact = False
                 else:
-                    contact = True
+                    # contact = True
                     # record current width
-                    diameter_approx = state.actual_gripper_width
+                    # diameter_approx = state.actual_gripper_width
                     if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (force_error <= (DELTA1)):
                         reached_hold_time = time.time()
                         q = HOLD
@@ -210,10 +231,10 @@ class PNS_Driver:
                 #             if compression != 0:
                 #                 k = (desired_force - force_avg) / compression
                 #                 # putting into moving average filter to make more readable
-                #                 k_filter.append(k)
-                #                 if len(k_filter) > MOVING_AVG_LEN_K:
-                #                     k_filter.pop(0)
-                #                 k = mean(k_filter)
+                #                 # k_filter.append(k)
+                #                 # if len(k_filter) > MOVING_AVG_LEN_K:
+                #                 #     k_filter.pop(0)
+                #                 # k = mean(k_filter)
                 #                 # self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
                 #             else:
                 #                 k = None
@@ -222,35 +243,31 @@ class PNS_Driver:
                 #     # hooke's law: F = k * (x0 - x), solve for x0 (cmd.target_width)
                 #     # x is diameter_approx
                 #     test = diameter_approx + (force_avg / k)
-                #     self.node.get_logger().info(f"target width: {test} mm and current width: {width} mm, current force: {force_avg}, q state: {q}")
+                #     self.node.get_logger().info(f"target width: {test} mm and current width: {tmp_width} mm, current force: {force_avg}, force: {force}, q state: {q}")
                     
 
                 if q != HOLD:
                     reached_hold_time = float("inf")
         
                 if q == HOLD:
-                    # No adjustment needed, hold current width
                     pass
                 elif q == TIGHTEN:  # move smaller
-                    cmd.target_width = cmd.target_width - SPEED_NORMAL
-                    self.node.get_logger().info(f"Tightening: {cmd.target_width}")
-                elif q == LOOSEN:  # move bigger
-                    cmd.target_width = cmd.target_width + SPEED_NORMAL
-                    self.node.get_logger().info(f"Loosening: {cmd.target_width}")
+                    tmp_width -= SPEED_NORMAL
+                elif q == LOOSEN:
+                    tmp_width += SPEED_NORMAL
                 elif q == TIGHTEN_FAST:
-                    cmd.target_width = cmd.target_width - SPEED_FAST
-                    self.node.get_logger().info(f"Tightening fast: {cmd.target_width}")
+                    tmp_width -= SPEED_FAST
                 elif q == LOOSEN_SLOW:
-                    cmd.target_width = cmd.target_width + SPEED_SLOW
+                    tmp_width += SPEED_SLOW
                 elif q == TIGHTEN_SLOW:
-                    cmd.target_width = cmd.target_width - SPEED_SLOW
+                    tmp_width -= SPEED_SLOW
                 
-                if cmd.target_width < 0:
-                    cmd.target_width = 0
-                elif cmd.target_width > 1000:
-                    cmd.target_width = 1000
+                if tmp_width < 0:
+                    tmp_width = 0
+                elif tmp_width > 1000:
+                    tmp_width = 1000
 
-                self.node.get_logger().info(f"target width: {cmd.target_width}, current force: {force_avg}, q state: {q}")
+                self.node.get_logger().info(f"prox: {ProxAvg:.2f}, target width: {tmp_width:.2f}, current force: {force_avg:.2f}, force: {force:.2f}, q state: {q}, raw fz_l: {l_force_raw:.2f}, raw fz_r: {r_force_raw:.2f}")
 
             if calibrated:
                 time_data.append(time.time())
@@ -261,9 +278,10 @@ class PNS_Driver:
                 width_data.append(width)
                 cmd_width_data.append(last_target)
                 prox_data.append(ProxAvg)
+                raw_fz_l_data.append(l_force_raw)
+                raw_fz_r_data.append(r_force_raw)
 
-            tmp_width = cmd.target_width
-            cmd.target_width = int(round(cmd.target_width))
+            cmd.target_width = int(round(tmp_width))
             cmd.target_force = int(round(cmd.target_force))
 
             if (desired_force == 0 and not self.done) or cmd.target_width != int(round(last_target)):
@@ -277,6 +295,7 @@ class PNS_Driver:
                         state = self.gripper.readState()
                         f_l_arr.append(abs(state.fz_l))
                         f_r_arr.append(abs(state.fz_r))
+                        time.sleep(PERIOD)
 
                     l_force_bias = mean(f_l_arr)
                     r_force_bias = mean(f_r_arr)
@@ -289,17 +308,33 @@ class PNS_Driver:
                         state = self.gripper.readState()
                         f_l_arr.append(abs(state.fz_l))
                         f_r_arr.append(abs(state.fz_r))
+                        time.sleep(PERIOD)
 
-                    l_force_drift = (mean(f_l_arr) - l_force_bias) / (CALIBRATION_TIME * LOOP_FREQ)
-                    r_force_drift = (mean(f_r_arr) - r_force_bias) / (CALIBRATION_TIME * LOOP_FREQ)
-                    self.node.get_logger().info("Force calibration complete!")
+                    l_force_drift = (mean(f_l_arr) - l_force_bias) / ((CALIBRATION_TIME + PERIOD * MOVING_AVG_LEN_FORCE) * LOOP_FREQ)
+                    r_force_drift = (mean(f_r_arr) - r_force_bias) / ((CALIBRATION_TIME + PERIOD * MOVING_AVG_LEN_FORCE) * LOOP_FREQ)
+                    # baseline_loop_counter = loop_counter
+                    self.node.get_logger().info(f"Force calibration complete! l_force_drift: {l_force_drift:.6f} per loop, r_force_drift: {r_force_drift:.6f} per loop\n Bias left: {l_force_bias:.6f}, Bias right: {r_force_bias:.6f}\n")
                     calibrated = True
+
+            # if self.enable_drift_comp and self.enable_online_rebaselining:
+            #     no_contact = desired_force == 0 and (ProxAvg > FAR or cmd.target_width >= OPEN_WIDTH - OPEN_HOLD_TOLERANCE)
+            #     if no_contact and calibrated:
+            #         alpha = max(0.0, min(1.0, self.rebaselining_alpha))
+            #         l_force_bias = (1 - alpha) * l_force_bias + alpha * l_force_raw
+            #         r_force_bias = (1 - alpha) * r_force_bias + alpha * r_force_raw
+            #         baseline_loop_counter = loop_counter
 
             last_target = tmp_width
 
             if not self.done and desired_force == self.fd and (time.time() - reached_hold_time > MIN_HOLD_TIME or time.time() - start_time > MAX_GRIP_TIME or desired_force == 0):
                 self.done = True
-            time.sleep(PERIOD)
+            # else:
+            #     self.node.get_logger().info(f"\nTime left: {MAX_GRIP_TIME - (time.time() - start_time):.2f}\n")
+
+            duration = time.time() - loop_start_time
+            if duration < PERIOD:
+                time.sleep(PERIOD - duration)
+            
             loop_counter += 1
 
         if not os.path.exists("data"):
@@ -307,11 +342,10 @@ class PNS_Driver:
         f_idx = 0
         while os.path.exists(f"data/hybrid_gripper_{f_idx}.csv"):
             f_idx += 1
-        f = open(f"data/hybrid_gripper_{f_idx}.csv", "w")
-        f.write("Time,ReachedHoldTime,Force,DesiredForce,State,ActualWidth,CommandWidth,Proximity\n")
-        for i in range(len(time_data)):
-            f.write(f"{time_data[i]},{hold_time_data[i]},{force_data[i]},{fd_data[i]},{state_data[i]},{width_data[i]},{cmd_width_data[i]},{prox_data[i]}\n")
-        f.close()
+        with open(f"data/hybrid_gripper_{f_idx}.csv", "w") as f:
+            f.write("Time,ReachedHoldTime,Force,DesiredForce,State,ActualWidth,CommandWidth,Proximity,RawFzL,RawFzR\n")
+            for i in range(len(time_data)):
+                f.write(f"{time_data[i]},{hold_time_data[i]},{force_data[i]},{fd_data[i]},{state_data[i]},{width_data[i]},{cmd_width_data[i]},{prox_data[i]},{raw_fz_l_data[i]},{raw_fz_r_data[i]}\n")
         self.node.get_logger().info(f"Data saved to data/hybrid_gripper_{f_idx}.csv")
 
 class CmdMove(object):
