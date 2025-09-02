@@ -73,7 +73,8 @@ data = [
 
 # simulations 7/10/2025
     # ("Ball", 40, 55, None, None, True),
-    ("Ball", 72, 91, None, None, True)
+    # ("Ball", 72, 91, None, None, True)
+    ("Ball", 80, 100, None, None, True)
 ]
 
 TOLERANCE = 0.05
@@ -264,7 +265,7 @@ for idx, item in enumerate(data):
         # plt.title(f"{title} - Force")
         plt.xlabel("Time (s)")
         plt.ylabel("Force (N)")
-        plt.ylim(0, 10)
+        plt.ylim(0, 4)
         plt.savefig(f"plots/{idx}_{title}_force.png")
         # plt.show()
         plt.close()

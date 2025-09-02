@@ -94,8 +94,8 @@ class PNS_Driver:
         DELTA1 = 0.1
 
         SPEED_FAST = 1.0
-        SPEED_NORMAL = 0.02
-        SPEED_SLOW = 0.002
+        SPEED_NORMAL = 0.02 * 2
+        SPEED_SLOW = 0.005
 
         OPEN_HOLD_TOLERANCE = 5
 
@@ -121,7 +121,7 @@ class PNS_Driver:
         raw_fz_l_data = []
         raw_fz_r_data = []
 
-        CALIBRATION_TIME = 60 # seconds
+        CALIBRATION_TIME = 0 # seconds
 
         calibrated = False
         l_force_bias = 0.0
@@ -187,7 +187,7 @@ class PNS_Driver:
             l_force = l_force_raw - l_force_bias - l_force_drift * loop_counter
             r_force = r_force_raw - r_force_bias - r_force_drift * loop_counter
 
-            force = (l_force + r_force) / 2 / 10
+            force = (l_force_raw + r_force_raw) / 2 / 10
             
             force_range.append(force)
             if len(force_range) > MOVING_AVG_LEN_FORCE:
@@ -216,9 +216,9 @@ class PNS_Driver:
                         reached_hold_time = time.time()
                         q = HOLD
                     elif (q == HOLD) and (force_error >= (DELTA2)):
-                        q = TIGHTEN
+                        q = TIGHTEN_SLOW
                     elif (q == HOLD) and (force_error <= (-1 * DELTA2)):
-                        q = LOOSEN
+                        q = LOOSEN_SLOW
                     elif (q == LOOSEN or q == LOOSEN_SLOW) and (force_error >= (-1 * DELTA1)):
                         reached_hold_time = time.time()
                         q = HOLD
@@ -448,7 +448,7 @@ if __name__ == "__main__":
         # (MOVE, None, None),
         # (MOVE, [-0.100, 0.520, 0.400], [-90, -112, 0]),
         # (MOVE, [-0.100, 0.620, 0.400], [-90, -112, 0]),
-        (GRIP, 3), # berry
+        (GRIP, 1), # berry
         # (GRIP, 3), # ball
         # (MOVE, [-0.100, 0.620, 0.300], [-90, -112, 0]),
         # (GRIP, 1),
