@@ -74,7 +74,9 @@ data = [
 # simulations 7/10/2025
     # ("Ball", 40, 55, None, None, True),
     # ("Ball", 72, 91, None, None, True)
-    ("Ball", 80, 100, None, None, True)
+    ("Ball", 80, 100, None, None, True),
+    ("Ball", 84, 104, None, None, True),
+    ("Ball", 85, 105, None, None, True)
 ]
 
 TOLERANCE = 0.05
