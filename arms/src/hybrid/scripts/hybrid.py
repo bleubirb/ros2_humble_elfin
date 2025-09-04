@@ -121,7 +121,7 @@ class PNS_Driver:
         raw_fz_l_data = []
         raw_fz_r_data = []
 
-        CALIBRATION_TIME = 0 # seconds
+        CALIBRATION_TIME = 30 # seconds
 
         calibrated = False
         l_force_bias = 0.0
