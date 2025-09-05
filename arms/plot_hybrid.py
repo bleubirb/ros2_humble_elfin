@@ -102,6 +102,8 @@ data = [
     # ("Water Bottle Squeeze", 143, 166, None, None, True), # squeeze no good
     ("Water Bottle Squeeze", 145, 168, None, None, True), # squeeze
     # TODO: water bottle fill
+    ("Water Bottle Fill", 146, 169, None, None, True), # fill
+    
 ]
 
 TOLERANCE = 0.05
