@@ -72,21 +72,36 @@ data = [
     # ("Ball", 92, 104, None, None, True), # if the force was 4, it would be perfect (4 -> 3N)
 
 # simulations 7/10/2025
-    # ("Ball", 40, 55, None, None, True),
-    # ("Ball", 72, 91, None, None, True)
-    ("Ball", 80, 100, None, None, True),
-    ("Ball", 84, 104, None, None, True),
-    ("Ball", 85, 105, None, None, True),
-    ("Ball", 92, 113, None, None, True),
-    ("Ball", 93, 114, None, None, True),
-    ("Ball", 94, 115, None, None, True),
-    ("Ball", 95, 116, None, None, True),
-    ("Ball", 96, 117, None, None, True),
-    ("Ball", 99, 120, None, None, True),
-    ("Ball", 100, 121, None, None, True),
-    ("Ball", 101, 122, None, None, True),
-    ("Ball", 102, 123, None, None, True)
-    # ("Ball", 97, 118, None, None, True)
+    # ("Ball", 80, 100, None, None, True),
+    # ("Ball", 84, 104, None, None, True),
+    # ("Ball", 85, 105, None, None, True),
+    # ("Ball", 92, 113, None, None, True),
+    # ("Ball", 93, 114, None, None, True),
+    # ("Ball", 94, 115, None, None, True),
+    # ("Ball", 95, 116, None, None, True),
+    # ("Ball", 96, 117, None, None, True),
+    # ("Ball", 99, 120, None, None, True),
+    # ("Ball", 100, 121, None, None, True),
+    # ("Ball", 101, 122, None, None, True),
+    # ("Ball", 102, 123, None, None, True),
+    # ("Water Bottle", 111, 132, None, None, True),
+    # ("Water Bottle", 123, 145, None, None, True),
+    # ("Water Bottle", 124, 146, None, None, True),
+    # ("Water Bottle", 125, 147, None, None, True),
+    # ("Water Bottle", 127, 149, None, None, True),
+    # ("Water Bottle", 130, 152, None, None, True),
+    # ("Water Bottle", 131, 153, None, None, True),
+    # ("Water Bottle", 132, 154, None, None, True),
+    ("Water Bottle Rotation", 133, 155, None, None, True), # rotation
+    ("Water Bottle Rotation", 134, 156, None, None, True), # rotation
+    # ("Water Bottle", 135, 157, None, None, True),
+    ("Water Bottle Rotation", 136, 158, None, None, True), # rotation
+    ("Water Bottle Rotation", 137, 159, None, None, True), # rotation
+    ("Water Bottle Rotation", 138, 161, None, None, True), # rotation
+    ("Water Bottle Squeeze", 141, 164, None, None, True), # squeeze
+    # ("Water Bottle Squeeze", 143, 166, None, None, True), # squeeze no good
+    ("Water Bottle Squeeze", 145, 168, None, None, True), # squeeze
+    # TODO: water bottle fill
 ]
 
 TOLERANCE = 0.05
