@@ -111,6 +111,8 @@ data = [
     # baseline long
     ("Water Bottle Long", 154, 177, None, None, False),
     ("Water Bottle Fill", 156, 179, None, None, False),
+    ("Water Bottle Squeeze", 157, 180, None, None, False),
+    
     
 ]
 
