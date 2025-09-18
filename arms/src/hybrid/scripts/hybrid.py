@@ -66,8 +66,8 @@ class PNS_Driver:
         desired_force = 0
         last_prox = 1000
 
-        MIN_HOLD_TIME = 120 # hold for 30 minutes -> testing temperature sensor drift
-        MAX_GRIP_TIME = 120  # seconds -> adjust for altering data collection amount
+        MIN_HOLD_TIME = 300 # hold for 30 minutes -> testing temperature sensor drift
+        MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
 
         # OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
