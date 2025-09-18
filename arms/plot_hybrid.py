@@ -107,6 +107,9 @@ data = [
     ("Water Bottle Fill", 148, 171, None, None, True), # fill
     ("Water Bottle Fill", 149, 172, None, None, True), # fill
     ("Water Bottle Fill", 150, 173, None, None, True), # fill
+
+    # baseline long
+    ("Water Bottle Long", 154, 177, None, None, False)
 ]
 
 TOLERANCE = 0.05

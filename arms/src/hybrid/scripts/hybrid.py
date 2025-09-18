@@ -69,7 +69,9 @@ class PNS_Driver:
         MIN_HOLD_TIME = 1800 # hold for 30 minutes -> testing temperature sensor drift
         MAX_GRIP_TIME = 1800  # seconds -> adjust for altering data collection amount
 
-        OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
+        # OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
+
+        OPEN_WIDTH = 670 # only for water bottle experiment
 
         # states for gripper control
         TIGHTEN_FAST = 3
@@ -90,11 +92,15 @@ class PNS_Driver:
         SLOW_FORCE_BOUND = 0.5
 
         # hysteresis thresholds
-        DELTA2 = 0.3
-        DELTA1 = 0.1
+        # DELTA2 = 0.3
+        # DELTA1 = 0.1
+
+        # no hysteresis
+        DELTA2 = 0.0
+        DELTA1 = 0.0
 
         SPEED_FAST = 1.0
-        SPEED_NORMAL = 0.02 * 2
+        SPEED_NORMAL = 0.05 * 2
         SPEED_SLOW = 0.005
 
         OPEN_HOLD_TOLERANCE = 5
@@ -121,7 +127,7 @@ class PNS_Driver:
         raw_fz_l_data = []
         raw_fz_r_data = []
 
-        CALIBRATION_TIME = 30 # seconds
+        CALIBRATION_TIME = 5 # seconds
 
         calibrated = False
         l_force_bias = 0.0
@@ -206,7 +212,7 @@ class PNS_Driver:
                     q = TIGHTEN_FAST
                     # contact = False
                 elif ProxAvg < FAR and ProxAvg > CLOSE and force_avg <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2:
-                    q = TIGHTEN
+                    q = TIGHTEN_FAST
                     # contact = False
                 else:
                     # contact = True
@@ -216,9 +222,9 @@ class PNS_Driver:
                         reached_hold_time = time.time()
                         q = HOLD
                     elif (q == HOLD) and (force_error >= (DELTA2)):
-                        q = TIGHTEN_SLOW
+                        q = TIGHTEN
                     elif (q == HOLD) and (force_error <= (-1 * DELTA2)):
-                        q = LOOSEN_SLOW
+                        q = LOOSEN
                     elif (q == LOOSEN or q == LOOSEN_SLOW) and (force_error >= (-1 * DELTA1)):
                         reached_hold_time = time.time()
                         q = HOLD
@@ -448,7 +454,7 @@ if __name__ == "__main__":
         # (MOVE, None, None),
         # (MOVE, [-0.100, 0.520, 0.400], [-90, -112, 0]),
         # (MOVE, [-0.100, 0.620, 0.400], [-90, -112, 0]),
-        (GRIP, 1), # berry
+        (GRIP, 1.5), # berry
         # (GRIP, 3), # ball
         # (MOVE, [-0.100, 0.620, 0.300], [-90, -112, 0]),
         # (GRIP, 1),
