@@ -5,9 +5,9 @@ DELTA1 = 0.1;
 
 % Data
 data = {
-    "No Hysteresis", 41, 50, false; 
-    "No Hysteresis", 43, 52, false; 
-    "No Hysteresis", 44, 53, false; 
+    % "No Hysteresis", 41, 50, false; 
+    % "No Hysteresis", 43, 52, false; 
+    % "No Hysteresis", 44, 53, false; 
     % "Stress Ball, 5N", 59, 68, 213, 218, true; % pos = 0.040, 0.620, 0.4; rot = -90, -112, 0;    "Stress Ball, 5N", 60, 69, 219, 224, true; 
     % "Stress Ball, 7N", 61, 70, 225, 230, true; 
     % "Stress Ball, 3N", 62, 71, 231, 236, true; 
@@ -30,6 +30,11 @@ data = {
     % "Fill Baseline", 156, 179, false;
     % "Squeeze Baseline", 157, 180, false;
     % "Rotation Baseline", 159, 183, false;
+
+    % "Move Test", 178, 204, false;
+    % "Move Test 2", 182, 208, false;
+    % "Move Test 3", 183, 209, false;
+    "Move Test 4", 184, 210, true;
 };
 
 % Iterate over data
@@ -93,6 +98,8 @@ for idx = 1:size(data, 1)
             % Map raw gripper state (col 5) to {-1,0,1}
             if g_file(i, 5) == 0
                 gripper_state_2(end+1) = 0;
+            elseif g_file(i, 5) == 4
+                gripper_state_2(end+1) = 2;
             elseif g_file(i, 5) > 0
                 gripper_state_2(end+1) = 1;
             else
@@ -101,16 +108,16 @@ for idx = 1:size(data, 1)
         end
 
         subplot(2, 1, 1); % First subplot
-    plot(time_2, gripper_state_2, 'LineWidth', 2);
+    plot(time_2, gripper_state_2, 'k', 'LineWidth', 2);
         set(gcf, "Theme", "Light");
-        set(gca, 'FontName', 'Times New Roman', 'FontSize', 14);
-        ylim([-2, 2]);
+        set(gca, 'FontName', 'Times New Roman', 'FontSize', 18);
+        ylim([-2, 3]);
         % xlim([0, 35]);
         xlabel('Time (s)');
         ylabel('State');
-    yticks([-1, 0, 1]);
-    yticklabels({'L', 'H', 'T'});
-        xlim([25, 90]);
+    yticks([-1, 0, 1, 2]);
+    yticklabels({'L', 'H', 'T', 'M'});
+        xlim([25, 120]);
         % title(sprintf('%s - Gripper State', title));
     end
 
@@ -130,7 +137,7 @@ for idx = 1:size(data, 1)
     plot(time_3, force_3, 'k', 'LineWidth', 1.5);
         % fontname(gcf, "Courier 10 Pitch");
         set(gcf, "Theme", "Light");
-        set(gca, 'FontName', 'Times New Roman', 'FontSize', 14);
+        set(gca, 'FontName', 'Times New Roman', 'FontSize', 18);
         hold on;
         if hyst
             % Constant ±DELTA hysteresis band around desired force
@@ -145,8 +152,8 @@ for idx = 1:size(data, 1)
         end
         xlabel('Time (s)');
         ylabel('Force (N)');
-        ylim([0, 4]);
-        xlim([25, 90]);
+        ylim([-1, 3]);
+        xlim([25, 120]);
         % title(sprintf('%s - Gripper Force', title));
     end
 
