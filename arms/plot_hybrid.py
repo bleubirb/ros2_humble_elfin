@@ -92,27 +92,38 @@ data = [
     # ("Water Bottle", 130, 152, None, None, True),
     # ("Water Bottle", 131, 153, None, None, True),
     # ("Water Bottle", 132, 154, None, None, True),
-    ("Water Bottle Rotation", 133, 155, None, None, True), # rotation
-    ("Water Bottle Rotation", 134, 156, None, None, True), # rotation
-    # ("Water Bottle", 135, 157, None, None, True),
-    ("Water Bottle Rotation", 136, 158, None, None, True), # rotation
-    ("Water Bottle Rotation", 137, 159, None, None, True), # rotation
-    ("Water Bottle Rotation", 138, 161, None, None, True), # rotation
-    ("Water Bottle Squeeze", 141, 164, None, None, True), # squeeze
-    # ("Water Bottle Squeeze", 143, 166, None, None, True), # squeeze no good
-    ("Water Bottle Squeeze", 145, 168, None, None, True), # squeeze
-    # TODO: water bottle fill
-    ("Water Bottle Fill", 146, 169, None, None, True), # fill
-    ("Water Bottle Fill", 147, 170, None, None, True), # fill
-    ("Water Bottle Fill", 148, 171, None, None, True), # fill
-    ("Water Bottle Fill", 149, 172, None, None, True), # fill
-    ("Water Bottle Fill", 150, 173, None, None, True), # fill
 
-    # baseline long
-    ("Water Bottle Long", 154, 177, None, None, False),
-    ("Water Bottle Fill", 156, 179, None, None, False),
-    ("Water Bottle Squeeze", 157, 180, None, None, False),
-    ("Water Bottle Rotate", 159, 183, None, None, False),
+    # ("Water Bottle Rotation", 133, 155, None, None, True), # rotation
+    # ("Water Bottle Rotation", 134, 156, None, None, True), # rotation
+    # # ("Water Bottle", 135, 157, None, None, True),
+    # ("Water Bottle Rotation", 136, 158, None, None, True), # rotation
+    # ("Water Bottle Rotation", 137, 159, None, None, True), # rotation
+    # ("Water Bottle Rotation", 138, 161, None, None, True), # rotation
+    # ("Water Bottle Squeeze", 141, 164, None, None, True), # squeeze
+    # # ("Water Bottle Squeeze", 143, 166, None, None, True), # squeeze no good
+    # ("Water Bottle Squeeze", 145, 168, None, None, True), # squeeze
+    # # TODO: water bottle fill
+    # ("Water Bottle Fill", 146, 169, None, None, True), # fill
+    # ("Water Bottle Fill", 147, 170, None, None, True), # fill
+    # ("Water Bottle Fill", 148, 171, None, None, True), # fill
+    # ("Water Bottle Fill", 149, 172, None, None, True), # fill
+    # ("Water Bottle Fill", 150, 173, None, None, True), # fill
+
+    # # baseline long
+    # ("Water Bottle Long", 154, 177, None, None, False),
+    # ("Water Bottle Fill", 156, 179, None, None, False),
+    # ("Water Bottle Squeeze", 157, 180, None, None, False),
+    # ("Water Bottle Rotate", 159, 183, None, None, False),
+    # ("Water Bottle Long", 164, 188, None, None, True),
+    
+    # # proximity
+    # ("Proximity Test 1", 174, 188, None, None, True),
+    # ("Proximity Test 2", 175, 188, None, None, True),
+    # ("Proximity Test 3", 177, 203, None, None, True),
+    ("Move Test", 178, 204, None, None, True),
+    ("Move Test 2", 182, 208, None, None, True),
+    ("Move Test 3", 183, 209, None, None, True),
+    ("Move Test 4", 184, 210, None, None, True),
     
     
     
@@ -206,6 +217,8 @@ for idx, item in enumerate(data):
             if simple_states_2:
                 if int(line[4]) == 0:
                     gripper_state_2.append(0)
+                elif int(line[4]) == 4:
+                    gripper_state_2.append(2)
                 elif int(line[4]) > 0:
                     gripper_state_2.append(1)
                 else:
@@ -220,13 +233,13 @@ for idx, item in enumerate(data):
         plt.ylabel("State")
         if simple_states_2:
             plt.yticks(
-                range(-1, 1 + 1),
-                ["LOOSEN", "HOLD", "TIGHTEN"],
+                range(-1, 2 + 1),
+                ["LOOSEN", "HOLD", "TIGHTEN", "MOVE"],
             )
         else:
             plt.yticks(
-                range(-2, 3 + 1),
-                ["LOOSEN", "LOOSEN\nSLOW", "HOLD", "TIGHTEN\nSLOW", "TIGHTEN", "TIGHTEN\nFAST"],
+                range(-2, 4 + 1),
+                ["LOOSEN", "LOOSEN\nSLOW", "HOLD", "TIGHTEN\nSLOW", "TIGHTEN", "TIGHTEN\nFAST", "MOVE"],
             )
         plt.savefig(f"plots/{idx}_{title}_gripper_state.png")
         # plt.show()
@@ -337,6 +350,29 @@ for idx, item in enumerate(data):
         if f"{idx}_{title}_cmd_width.png" in files:
             files.remove(f"{idx}_{title}_cmd_width.png")
 
+    # gripper proximity over time
+    time_5 = []
+    proximity_5 = []
+    if g_file:
+        for line in g_file[1:]:
+            line = line.split(",")
+            if float(line[0]) < start_time:
+                continue
+
+            t = float(line[0]) - start_time
+            time_5.append(t)
+            proximity_5.append(float(line[7]))
+
+        plt.figure()
+        plt.plot(time_5, proximity_5)
+        # plt.title(f"{title} - Proximity")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Proximity (m)")
+        plt.savefig(f"plots/{idx}_{title}_proximity.png")
+        # plt.show()
+        plt.close()
+        if f"{idx}_{title}_proximity.png" in files:
+            files.remove(f"{idx}_{title}_proximity.png")
     # continue
 
     # 6 arm plots

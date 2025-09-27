@@ -66,14 +66,15 @@ class PNS_Driver:
         desired_force = 0
         last_prox = 1000
 
-        MIN_HOLD_TIME = 300 # hold for 30 minutes -> testing temperature sensor drift
-        MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
+        MIN_HOLD_TIME = 120 # hold for 30 minutes -> testing temperature sensor drift
+        MAX_GRIP_TIME = 120  # seconds -> adjust for altering data collection amount
 
         # OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
         OPEN_WIDTH = 670 # only for water bottle experiment
 
         # states for gripper control
+        MOVE = 4
         TIGHTEN_FAST = 3
         TIGHTEN = 2
         TIGHTEN_SLOW = 1
@@ -92,12 +93,12 @@ class PNS_Driver:
         SLOW_FORCE_BOUND = 0.5
 
         # hysteresis thresholds
-        # DELTA2 = 0.3
-        # DELTA1 = 0.1
+        DELTA2 = 0.3
+        DELTA1 = 0.1
 
         # no hysteresis
-        DELTA2 = 0.0
-        DELTA1 = 0.0
+        # DELTA2 = 0.0
+        # DELTA1 = 0.0
 
         SPEED_FAST = 1.0
         SPEED_NORMAL = 0.05 * 2
@@ -171,10 +172,50 @@ class PNS_Driver:
 
             ProxAvg = (ProxL + ProxR) / 2 # divide by two due to width between two fingers (find midpoint)
 
-            if mean([state.proximity_value_l, state.proximity_value_r]) - last_prox > CLOSE:
-                desired_force = 0
-                self.fd = 0
-                self.done = False
+            if mean([state.proximity_value_l, state.proximity_value_r]) - last_prox > 200:
+                # desired_force = 0
+                # self.fd = 0
+
+                # attempt to regrip if object slipped, wait 5 seconds before regrip
+                self.node.get_logger().info("Object slip detected, attempting to regrip...")
+                
+                last_prox = ProxAvg
+
+                tmp_width = OPEN_WIDTH
+                last_target = tmp_width
+                cmd.target_width = int(round(tmp_width))
+
+                self.gripper.writeCommand(cmd)
+
+                # mark move state in program state data
+                q = MOVE
+                reached_hold_time = float("inf")
+                force_range = []
+
+                delay_start_time = time.time()
+
+                while time.time() - delay_start_time < 5:
+                    time_data.append(time.time())
+                    hold_time_data.append(0)
+                    force_data.append(0)
+                    fd_data.append(desired_force)
+                    state_data.append(q)
+                    width_data.append(width)
+                    cmd_width_data.append(last_target)
+                    prox_data.append(ProxAvg)
+                    raw_fz_l_data.append(0)
+                    raw_fz_r_data.append(0)
+
+                    time.sleep(PERIOD)
+                    loop_counter += 1
+
+                # time.sleep(5)
+                # desired_force = 1.5
+                # self.fd = 1.5
+                self.node.get_logger().info("Regrip command sent, resuming force control...")
+                q = TIGHTEN
+                # self.done = False
+                continue
 
             last_prox = ProxAvg
 
@@ -212,7 +253,7 @@ class PNS_Driver:
                     q = TIGHTEN_FAST
                     # contact = False
                 elif ProxAvg < FAR and ProxAvg > CLOSE and force_avg <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2:
-                    q = TIGHTEN_FAST
+                    q = TIGHTEN
                     # contact = False
                 else:
                     # contact = True
@@ -288,7 +329,7 @@ class PNS_Driver:
                 raw_fz_r_data.append(r_force_raw)
 
             cmd.target_width = int(round(tmp_width))
-            cmd.target_force = int(round(cmd.target_force))
+            # cmd.target_force = int(round(cmd.target_force))
 
             if (desired_force == 0 and not self.done) or cmd.target_width != int(round(last_target)):
                 self.gripper.writeCommand(cmd)
@@ -418,7 +459,7 @@ class CmdMove(object):
             response = requests.get(
                     f"http://{OUTSOURCE_IP}:5001/move",
                     json={
-                        "position": target_pose,
+                        "position": target_position,
                         "orientation": target_orientation,
                         "starting_joint_state": theta_vals.tolist(),
                     },
