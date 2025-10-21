@@ -66,12 +66,12 @@ class PNS_Driver:
         desired_force = 0
         last_prox = 1000
 
-        MIN_HOLD_TIME = 120 # hold for 30 minutes -> testing temperature sensor drift
-        MAX_GRIP_TIME = 120  # seconds -> adjust for altering data collection amount
+        MIN_HOLD_TIME = 300 # hold for 5 minutes -> testing temperature sensor drift
+        MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
 
         # OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
-        OPEN_WIDTH = 550 # only for water bottle experiment
+        OPEN_WIDTH = 670 # only for water bottle experiment
 
         # states for gripper control
         MOVE = 4
@@ -93,12 +93,12 @@ class PNS_Driver:
         SLOW_FORCE_BOUND = 0.5
 
         # hysteresis thresholds
-        # DELTA2 = 0.3
-        # DELTA1 = 0.1
+        DELTA2 = 0.3
+        DELTA1 = 0.1
 
         # no hysteresis
-        DELTA2 = 0.0
-        DELTA1 = 0.0
+        # DELTA2 = 0.0
+        # DELTA1 = 0.0
 
         SPEED_FAST = 1.0
         SPEED_NORMAL = 0.05 * 2
@@ -172,7 +172,7 @@ class PNS_Driver:
 
             ProxAvg = (ProxL + ProxR) / 2 # divide by two due to width between two fingers (find midpoint)
 
-            if mean([state.proximity_value_l, state.proximity_value_r]) - last_prox > 0:
+            if mean([state.proximity_value_l, state.proximity_value_r]) - last_prox > 200:
                 # desired_force = 0
                 # self.fd = 0
 
@@ -253,7 +253,7 @@ class PNS_Driver:
                     q = TIGHTEN_FAST
                     # contact = False
                 elif ProxAvg < FAR and ProxAvg > CLOSE and force_avg <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2:
-                    q = TIGHTEN
+                    q = TIGHTEN_FAST
                     # contact = False
                 else:
                     # contact = True

@@ -120,13 +120,14 @@ data = [
     # ("Proximity Test 1", 174, 188, None, None, True),
     # ("Proximity Test 2", 175, 188, None, None, True),
     # ("Proximity Test 3", 177, 203, None, None, True),
-    ("Move Test", 178, 204, None, None, True),
-    ("Move Test 2", 182, 208, None, None, True),
-    ("Move Test 3", 183, 209, None, None, True),
-    ("Move Test 4", 184, 210, None, None, True),
-    ("Move Test 5", 185, 211, None, None, True),
-    ("Move Test 6", 186, 211, None, None, True),
-    ("Move Test 7", 188, 214, None, None, True),
+    # ("Move Test", 178, 204, None, None, True),
+    # ("Move Test 2", 182, 208, None, None, True),
+    # ("Move Test 3", 183, 209, None, None, True),
+    # ("Move Test 4", 184, 210, None, None, True),
+    # ("Move Test 5", 185, 211, None, None, True),
+    # ("Move Test 6", 186, 211, None, None, True),
+    # ("Move Test 7", 188, 214, None, None, True),
+    ("squeeze test", 187, 216, None, None, True),
     
     
     
@@ -165,7 +166,10 @@ for idx, item in enumerate(data):
     elif os.path.exists(f"../arms/data/hybrid_state_{state}.csv"):
         s_file = open(f"../arms/data/hybrid_state_{state}.csv", "r").readlines()
         # start_time = min(start_time, float(s_file[1].split(",")[0]))
-        start_time = max(start_time, float(s_file[1].split(",")[0]))
+        if len(s_file) > 1:
+            start_time = max(start_time, float(s_file[1].split(",")[0]))
+        else:
+            print(f"File arms/data/hybrid_state_{state}.csv does not have enough lines.")
     else:
         print(f"Couldn't find arms/data/hybrid_state_{state}.csv")
 
