@@ -5,25 +5,27 @@ OnRobot Grippers using the Modbus/TCP protocol.
 """
 
 import threading
+
 try:
     # pymodbus < 3.0
     from pymodbus.client.sync import ModbusTcpClient  # type: ignore
 except Exception:  # pymodbus >= 3.0
     from pymodbus.client import ModbusTcpClient  # type: ignore
 
+
 class OnRobotTcpClient:
-    """ communication sends commands and receives the status of RG gripper.
+    """communication sends commands and receives the status of RG gripper.
 
-        Attributes:
-            client (pymodbus.client.sync.ModbusTcpClient):
-                instance of ModbusTcpClient to establish modbus connection
-            lock (threading.Lock):
-                instance of the threading.Lock to achieve exclusive control
+    Attributes:
+        client (pymodbus.client.sync.ModbusTcpClient):
+            instance of ModbusTcpClient to establish modbus connection
+        lock (threading.Lock):
+            instance of the threading.Lock to achieve exclusive control
 
-            connectToDevice: Connects to the client device (gripper).
-            disconnectFromDevice: Closes connection.
-            sendCommand: Sends a command to the Gripper.
-            getStatus: Sends a request to read and returns the gripper status.
+        connectToDevice: Connects to the client device (gripper).
+        disconnectFromDevice: Closes connection.
+        sendCommand: Sends a command to the Gripper.
+        getStatus: Sends a request to read and returns the gripper status.
     """
 
     def __init__(self):
@@ -31,12 +33,12 @@ class OnRobotTcpClient:
         self.lock = threading.Lock()
 
     def connect(self, ip, port, changer_addr=65):
-        """ Connects to the client device (gripper).
+        """Connects to the client device (gripper).
 
-            Args:
-                ip (str): IP address (e.g. '192.168.1.1')
-                port (str): port number (e.g. '502')
-                changer_addr (int): quick tool changer address
+        Args:
+            ip (str): IP address (e.g. '192.168.1.1')
+            port (str): port number (e.g. '502')
+            changer_addr (int): quick tool changer address
         """
 
         self.client = ModbusTcpClient(
@@ -44,46 +46,49 @@ class OnRobotTcpClient:
             port=port,
             stopbits=1,
             bytesize=8,
-            parity='E',
+            parity="E",
             baudrate=115200,
-            timeout=1)
+            timeout=1,
+        )
         self.changer_addr = changer_addr
         self.client.connect()
 
     def disconnect(self):
-        """ Closes connection. """
+        """Closes connection."""
         self.client.close()
 
     def write(self, address, message):
-        """ Sends a command to the Gripper.
+        """Sends a command to the Gripper.
 
-            Args:
-                message (list[int]): message to be sent
+        Args:
+            message (list[int]): message to be sent
         """
 
         # Sending a command to the device (address 0 ~ 2)
         if len(message) > 0:
             with self.lock:
                 self.client.write_registers(
-                    address=address, values=message, unit=self.changer_addr)
+                    address=address, values=message, unit=self.changer_addr
+                )
 
     def read(self, address, count):
-        """ Sends a request to read and returns the gripper status. """
+        """Sends a request to read and returns the gripper status."""
 
         # Getting status from the device (address 257 ~ 282)
         with self.lock:
             response = self.client.read_holding_registers(
-                address=address, count=count, unit=self.changer_addr).registers
+                address=address, count=count, unit=self.changer_addr
+            ).registers
 
         # Output the result
         return response
 
     def restart_power_cycle(self):
-        """ Restarts the power cycle of Compute Box.
+        """Restarts the power cycle of Compute Box.
 
-            Necessary is Safety Switch of the grippers are pressed
-            Writing 2 to this field powers the tool off
-            for a short amount of time and then powers them back
+        Necessary is Safety Switch of the grippers are pressed
+        Writing 2 to this field powers the tool off
+        for a short amount of time and then powers them back
         """
 
         message = 2

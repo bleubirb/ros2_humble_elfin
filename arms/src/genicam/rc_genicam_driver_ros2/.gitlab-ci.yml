@@ -1,0 +1,188 @@
+variables:
+  GET_SOURCES_ATTEMPTS: "3"
+  GIT_DEPTH: "0"
+
+default:
+  before_script:
+  - export DEBIAN_FRONTEND=noninteractive
+  - apt-get update -yq && apt-get install -y curl file git lintian lsb-release
+  - export DISTRO_CODENAME=`lsb_release -cs` && echo Using distro $DISTRO_CODENAME
+  - echo Using ROS_DISTRO $ROS_DISTRO
+  - echo "deb http://apt.roboception.de/stable $DISTRO_CODENAME main" > /etc/apt/sources.list.d/roboception-stable.list
+  - if [ "$TESTING_DEBS" = "true" ]; then echo "deb http://apt.roboception.de/testing $DISTRO_CODENAME main" > /etc/apt/sources.list.d/roboception-testing.list ; fi
+  - curl -fsSL http://apt.roboception.de/archive.key | apt-key add -
+  - apt-get update -yq
+  - if [ "$ROS_DISTRO" = "rolling" ]; then apt-get -y upgrade; fi
+  - apt-get install -y ros-${ROS_DISTRO}-rc-common-msgs ros-${ROS_DISTRO}-rc-genicam-api
+  - rosdep install --from-paths . --ignore-src -r -y --skip-keys="rc_genicam_api"
+  - export CMAKE_PREFIX_PATH="/opt/ros/$ROS_DISTRO"
+
+#########################
+# Templates using anchors
+#########################
+.amd64_humble_t: &amd64_humble_job
+  image: ros:humble-ros-base-jammy
+  tags:
+    - amd64
+    - docker
+
+.amd64_jazzy_t: &amd64_jazzy_job
+  image: ros:jazzy-ros-base-noble
+  tags:
+    - amd64
+    - docker
+
+.amd64_rolling_t: &amd64_rolling_job
+  image: ros:rolling-ros-base-noble
+  tags:
+    - amd64
+    - docker
+
+#############
+# Templates
+#############
+.test:
+  stage: test
+  script:
+    - mkdir build && cd build
+    - touch AMENT_IGNORE
+    - cmake ..
+    - make -j 4
+    - CTEST_OUTPUT_ON_FAILURE=1 make test
+
+# run test script with latest debs from testing installed
+.test_latest:
+  extends: .test
+  variables:
+    TESTING_DEBS: "true"
+
+# run test script with released debs from stable installed (allowed to fail)
+.test_stable:
+  extends: .test
+  allow_failure: true
+  except:
+    - /^v[0-9]+\.[0-9]+\.[0-9]+/
+
+# run test script with released debs from stable (only for releases, mustn't fail)
+.test_release:
+  extends: .test
+  only:
+    - /^v[0-9]+\.[0-9]+\.[0-9]+/
+  except:
+    - branches
+
+# Debian packaging
+.package:
+  stage: deploy
+  script:
+    - mkdir build && cd build
+    - cmake -DCMAKE_INSTALL_PREFIX="/opt/ros/$ROS_DISTRO" -DCMAKE_BUILD_TYPE=Release ..
+    - make -j 4
+    - make package
+    - if [ -z "$APT_REPO" ]; then export APT_REPO=testing; fi
+    - upload_deb.sh $DISTRO_CODENAME-$APT_REPO *.deb
+
+.package_testing:
+  extends: .package
+  only:
+    - master
+  except:
+    - tags
+  variables:
+    TESTING_DEBS: "true"
+    APT_REPO: "testing"
+
+.package_stable:
+  extends: .package
+  only:
+    - /^v[0-9]+\.[0-9]+\.[0-9]+/
+  except:
+    - branches
+  variables:
+    APT_REPO: "stable"
+
+##############
+#### Jobs ####
+##############
+
+################
+# Testing builds
+################
+
+# Test against latest (on every commit)
+#######################################
+test:humble:amd64:
+  <<: *amd64_humble_job
+  extends: .test_latest
+
+test:jazzy:amd64:
+  <<: *amd64_jazzy_job
+  extends: .test_latest
+
+test:rolling:amd64:
+  <<: *amd64_rolling_job
+  extends: .test_latest
+  allow_failure: true
+
+# Test against stable (is allowed to fail)
+##########################################
+test_stable:humble:amd64:
+  <<: *amd64_humble_job
+  extends: .test_stable
+
+test_stable:jazzy:amd64:
+  <<: *amd64_jazzy_job
+  extends: .test_stable
+
+test_stable:rolling:amd64:
+  <<: *amd64_rolling_job
+  extends: .test_stable
+
+# Deploy testing (only on master)
+#################################
+package_testing:humble:amd64:
+  <<: *amd64_humble_job
+  extends: .package_testing
+
+package_testing:jazzy:amd64:
+  <<: *amd64_jazzy_job
+  extends: .package_testing
+
+package_testing:rolling:amd64:
+  <<: *amd64_rolling_job
+  extends: .package_testing
+  allow_failure: true
+
+################
+# Stable builds
+################
+
+# Test against stable if it is a release
+########################################
+test_release:humble:amd64:
+  <<: *amd64_humble_job
+  extends: .test_release
+
+test_release:jazzy:amd64:
+  <<: *amd64_jazzy_job
+  extends: .test_release
+
+test_release:rolling:amd64:
+  <<: *amd64_rolling_job
+  extends: .test_release
+  allow_failure: true
+
+# Deploy stable (only for releases, version tags)
+#################################################
+package_stable:humble:amd64:
+  <<: *amd64_humble_job
+  extends: .package_stable
+
+package_stable:jazzy:amd64:
+  <<: *amd64_jazzy_job
+  extends: .package_stable
+
+package_stable:rolling:amd64:
+  <<: *amd64_rolling_job
+  extends: .package_stable
+  allow_failure: true

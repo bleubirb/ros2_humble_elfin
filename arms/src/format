@@ -1,0 +1,13 @@
+#!/bin/bash
+
+cd "$(dirname "$(readlink -f "$0")")"
+FOLDERS="hybrid vision elfin_robot_ros2/pns_control OnRobot-RG2FT-ROS"
+
+autoflake -v $FOLDERS
+echo "autoflake done"
+
+python3 -m black $FOLDERS
+echo "black done"
+
+python3 -m isort $FOLDERS
+echo "isort done"

@@ -1,36 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import math
-from statistics import mean
-import time
 import os
-import sys
-import matplotlib.pyplot as plt
+
+# from geometry_msgs.msg import Wrench, PoseStamped, PoseArray, Pose
+import threading
+import time
+from statistics import mean
+
 import numpy as np
 import rclpy
 import rclpy.node
-from onrobot_rg2ft_control.OnRobotRG2FT import OnRobotRG2FT
-from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
-# from geometry_msgs.msg import Wrench, PoseStamped, PoseArray, Pose
-import threading
-from sensor_msgs.msg import JointState
+import requests
+
 # from control_msgs.msg import JointTrajectoryControllerState
 from moveit_msgs.srv import GetMotionPlan
+from onrobot_rg2ft_control.OnRobotRG2FT import OnRobotRG2FT
+from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
+
 # from moveit_msgs.msg import JointConstraint, MotionPlanResponse
 from sensor_msgs.msg import JointState
-import requests
+
 # import move_solver as ms
 
-OUTSOURCE_IP = "127.0.0.1" # should not need with new computer, adds latency for requests
+OUTSOURCE_IP = (
+    "127.0.0.1"  # should not need with new computer, adds latency for requests
+)
 # implement move_solver
+
 
 class PNS_Driver:
     def __init__(self, node, ip, port):
         self.node = node
         self.gripper = OnRobotRG2FT(ip, port)
         self.state_pub = node.create_publisher(RG2FTState, "state", 1)
-        self.cmd_sub = node.create_subscription(RG2FTCommand, "command", self.gripper.writeCommand, 1)
+        self.cmd_sub = node.create_subscription(
+            RG2FTCommand, "command", self.gripper.writeCommand, 1
+        )
         self.fd = 0
         self.done = True
         self.shutdown = False
@@ -57,21 +63,21 @@ class PNS_Driver:
         self.thread.join()
 
     def loop(self):
-        LOOP_FREQ = 100 # Hz
+        LOOP_FREQ = 100  # Hz
         PERIOD = 1.0 / LOOP_FREQ
         force_avg = 0
         # movement = 200 # for berry -> should not need this either, test without
-        movement = 300 # for ball
+        movement = 300  # for ball
         q = 0
         desired_force = 0
         last_prox = 1000
 
-        MIN_HOLD_TIME = 300 # hold for 5 minutes -> testing temperature sensor drift
+        MIN_HOLD_TIME = 300  # hold for 5 minutes -> testing temperature sensor drift
         MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
 
         # OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
-        OPEN_WIDTH = 670 # only for water bottle experiment
+        OPEN_WIDTH = 670  # only for water bottle experiment
 
         # states for gripper control
         MOVE = 4
@@ -84,7 +90,7 @@ class PNS_Driver:
 
         # proximity redundancy -> should not need this anymore, test without
         FAR = 500
-        CLOSE = 300 
+        CLOSE = 300
 
         MOVING_AVG_LEN_FORCE = 100
         MOVING_AVG_LEN_PROX = 100
@@ -128,13 +134,13 @@ class PNS_Driver:
         raw_fz_l_data = []
         raw_fz_r_data = []
 
-        CALIBRATION_TIME = 5 # seconds
+        CALIBRATION_TIME = 5  # seconds
 
         calibrated = False
         l_force_bias = 0.0
         r_force_bias = 0.0
-        l_force_drift = 0.0   # per loop increment
-        r_force_drift = 0.0   # per loop increment
+        l_force_drift = 0.0  # per loop increment
+        r_force_drift = 0.0  # per loop increment
         # baseline_loop_counter = 0  # loop index at last calibration/rebaseline
 
         tmp_width = 0
@@ -150,8 +156,8 @@ class PNS_Driver:
                 start_time = time.time()
 
             cmd = RG2FTCommand()
-            tmp_width = last_target # mm
-            cmd.target_force = movement # target force is how aggressive the gripper moves, NOT the actual force applied
+            tmp_width = last_target  # mm
+            cmd.target_force = movement  # target force is how aggressive the gripper moves, NOT the actual force applied
             cmd.control = 1
 
             prox_l_range.append(state.proximity_value_l)
@@ -170,15 +176,22 @@ class PNS_Driver:
             # if cmd.target_width == 0:
             #     cmd.target_width = int(max(0, min(65535, round(width))))
 
-            ProxAvg = (ProxL + ProxR) / 2 # divide by two due to width between two fingers (find midpoint)
+            ProxAvg = (
+                ProxL + ProxR
+            ) / 2  # divide by two due to width between two fingers (find midpoint)
 
-            if mean([state.proximity_value_l, state.proximity_value_r]) - last_prox > 200:
+            if (
+                mean([state.proximity_value_l, state.proximity_value_r]) - last_prox
+                > 200
+            ):
                 # desired_force = 0
                 # self.fd = 0
 
                 # attempt to regrip if object slipped, wait 5 seconds before regrip
-                self.node.get_logger().info("Object slip detected, attempting to regrip...")
-                
+                self.node.get_logger().info(
+                    "Object slip detected, attempting to regrip..."
+                )
+
                 last_prox = ProxAvg
 
                 tmp_width = OPEN_WIDTH
@@ -212,7 +225,9 @@ class PNS_Driver:
                 # time.sleep(5)
                 # desired_force = 1.5
                 # self.fd = 1.5
-                self.node.get_logger().info("Regrip command sent, resuming force control...")
+                self.node.get_logger().info(
+                    "Regrip command sent, resuming force control..."
+                )
                 q = TIGHTEN
                 # self.done = False
                 continue
@@ -235,7 +250,7 @@ class PNS_Driver:
             r_force = r_force_raw - r_force_bias - r_force_drift * loop_counter
 
             force = (l_force_raw + r_force_raw) / 2 / 10
-            
+
             force_range.append(force)
             if len(force_range) > MOVING_AVG_LEN_FORCE:
                 force_range.pop(0)
@@ -249,27 +264,40 @@ class PNS_Driver:
                 if abs(width - tmp_width) < OPEN_HOLD_TOLERANCE:
                     reached_hold_time = min(reached_hold_time, time.time())
             else:
-                if ProxAvg > FAR and force_avg <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2:
+                if (
+                    ProxAvg > FAR
+                    and force_avg
+                    <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2
+                ):
                     q = TIGHTEN_FAST
                     # contact = False
-                elif ProxAvg < FAR and ProxAvg > CLOSE and force_avg <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2:
+                elif (
+                    ProxAvg < FAR
+                    and ProxAvg > CLOSE
+                    and force_avg
+                    <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2
+                ):
                     q = TIGHTEN_FAST
                     # contact = False
                 else:
                     # contact = True
                     # record current width
                     # diameter_approx = state.actual_gripper_width
-                    if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (force_error <= (DELTA1)):
+                    if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (
+                        force_error <= (DELTA1)
+                    ):
                         reached_hold_time = time.time()
                         q = HOLD
                     elif (q == HOLD) and (force_error >= (DELTA2)):
                         q = TIGHTEN
                     elif (q == HOLD) and (force_error <= (-1 * DELTA2)):
                         q = LOOSEN
-                    elif (q == LOOSEN or q == LOOSEN_SLOW) and (force_error >= (-1 * DELTA1)):
+                    elif (q == LOOSEN or q == LOOSEN_SLOW) and (
+                        force_error >= (-1 * DELTA1)
+                    ):
                         reached_hold_time = time.time()
                         q = HOLD
-            
+
                 # for parameter estimation of spring constant (remove if no estimation)
                 # if contact:
                 #     if not self.done:
@@ -291,11 +319,10 @@ class PNS_Driver:
                 #     # x is diameter_approx
                 #     test = diameter_approx + (force_avg / k)
                 #     self.node.get_logger().info(f"target width: {test} mm and current width: {tmp_width} mm, current force: {force_avg}, force: {force}, q state: {q}")
-                    
 
                 if q != HOLD:
                     reached_hold_time = float("inf")
-        
+
                 if q == HOLD:
                     pass
                 elif q == TIGHTEN:  # move smaller
@@ -308,17 +335,21 @@ class PNS_Driver:
                     tmp_width += SPEED_SLOW
                 elif q == TIGHTEN_SLOW:
                     tmp_width -= SPEED_SLOW
-                
+
                 if tmp_width < 0:
                     tmp_width = 0
                 elif tmp_width > 1000:
                     tmp_width = 1000
 
-                self.node.get_logger().info(f"prox: {ProxAvg:.2f}, target width: {tmp_width:.2f}, current force: {force_avg:.2f}, force: {force:.2f}, q state: {q}, raw fz_l: {l_force_raw:.2f}, raw fz_r: {r_force_raw:.2f}")
+                self.node.get_logger().info(
+                    f"prox: {ProxAvg:.2f}, target width: {tmp_width:.2f}, current force: {force_avg:.2f}, force: {force:.2f}, q state: {q}, raw fz_l: {l_force_raw:.2f}, raw fz_r: {r_force_raw:.2f}"
+                )
 
             if calibrated:
                 time_data.append(time.time())
-                hold_time_data.append(0 if reached_hold_time > time.time() else reached_hold_time)
+                hold_time_data.append(
+                    0 if reached_hold_time > time.time() else reached_hold_time
+                )
                 force_data.append(force_avg)
                 fd_data.append(desired_force)
                 state_data.append(q)
@@ -331,7 +362,9 @@ class PNS_Driver:
             cmd.target_width = int(round(tmp_width))
             # cmd.target_force = int(round(cmd.target_force))
 
-            if (desired_force == 0 and not self.done) or cmd.target_width != int(round(last_target)):
+            if (desired_force == 0 and not self.done) or cmd.target_width != int(
+                round(last_target)
+            ):
                 self.gripper.writeCommand(cmd)
                 if cmd.target_width == OPEN_WIDTH and not calibrated:
                     time.sleep(1)
@@ -346,9 +379,9 @@ class PNS_Driver:
 
                     l_force_bias = mean(f_l_arr)
                     r_force_bias = mean(f_r_arr)
-                    
+
                     time.sleep(CALIBRATION_TIME)
-                    
+
                     f_l_arr = []
                     f_r_arr = []
                     for _ in range(MOVING_AVG_LEN_FORCE):
@@ -357,10 +390,16 @@ class PNS_Driver:
                         f_r_arr.append(abs(state.fz_r))
                         time.sleep(PERIOD)
 
-                    l_force_drift = (mean(f_l_arr) - l_force_bias) / ((CALIBRATION_TIME + PERIOD * MOVING_AVG_LEN_FORCE) * LOOP_FREQ)
-                    r_force_drift = (mean(f_r_arr) - r_force_bias) / ((CALIBRATION_TIME + PERIOD * MOVING_AVG_LEN_FORCE) * LOOP_FREQ)
+                    l_force_drift = (mean(f_l_arr) - l_force_bias) / (
+                        (CALIBRATION_TIME + PERIOD * MOVING_AVG_LEN_FORCE) * LOOP_FREQ
+                    )
+                    r_force_drift = (mean(f_r_arr) - r_force_bias) / (
+                        (CALIBRATION_TIME + PERIOD * MOVING_AVG_LEN_FORCE) * LOOP_FREQ
+                    )
                     # baseline_loop_counter = loop_counter
-                    self.node.get_logger().info(f"Force calibration complete! l_force_drift: {l_force_drift:.6f} per loop, r_force_drift: {r_force_drift:.6f} per loop\n Bias left: {l_force_bias:.6f}, Bias right: {r_force_bias:.6f}\n")
+                    self.node.get_logger().info(
+                        f"Force calibration complete! l_force_drift: {l_force_drift:.6f} per loop, r_force_drift: {r_force_drift:.6f} per loop\n Bias left: {l_force_bias:.6f}, Bias right: {r_force_bias:.6f}\n"
+                    )
                     calibrated = True
 
             # if self.enable_drift_comp and self.enable_online_rebaselining:
@@ -373,7 +412,15 @@ class PNS_Driver:
 
             last_target = tmp_width
 
-            if not self.done and desired_force == self.fd and (time.time() - reached_hold_time > MIN_HOLD_TIME or time.time() - start_time > MAX_GRIP_TIME or desired_force == 0):
+            if (
+                not self.done
+                and desired_force == self.fd
+                and (
+                    time.time() - reached_hold_time > MIN_HOLD_TIME
+                    or time.time() - start_time > MAX_GRIP_TIME
+                    or desired_force == 0
+                )
+            ):
                 self.done = True
             # else:
             #     self.node.get_logger().info(f"\nTime left: {MAX_GRIP_TIME - (time.time() - start_time):.2f}\n")
@@ -381,7 +428,7 @@ class PNS_Driver:
             duration = time.time() - loop_start_time
             if duration < PERIOD:
                 time.sleep(PERIOD - duration)
-            
+
             loop_counter += 1
 
         if not os.path.exists("data"):
@@ -390,17 +437,29 @@ class PNS_Driver:
         while os.path.exists(f"data/hybrid_gripper_{f_idx}.csv"):
             f_idx += 1
         with open(f"data/hybrid_gripper_{f_idx}.csv", "w") as f:
-            f.write("Time,ReachedHoldTime,Force,DesiredForce,State,ActualWidth,CommandWidth,Proximity,RawFzL,RawFzR\n")
+            f.write(
+                "Time,ReachedHoldTime,Force,DesiredForce,State,ActualWidth,CommandWidth,Proximity,RawFzL,RawFzR\n"
+            )
             for i in range(len(time_data)):
-                f.write(f"{time_data[i]},{hold_time_data[i]},{force_data[i]},{fd_data[i]},{state_data[i]},{width_data[i]},{cmd_width_data[i]},{prox_data[i]},{raw_fz_l_data[i]},{raw_fz_r_data[i]}\n")
+                f.write(
+                    f"{time_data[i]},{hold_time_data[i]},{force_data[i]},{fd_data[i]},{state_data[i]},{width_data[i]},{cmd_width_data[i]},{prox_data[i]},{raw_fz_l_data[i]},{raw_fz_r_data[i]}\n"
+                )
         self.node.get_logger().info(f"Data saved to data/hybrid_gripper_{f_idx}.csv")
+
 
 class CmdMove(object):
     def __init__(self, node):
         self.node = node
-        self.joints_sub = node.create_subscription(JointState, "/elfin_arm_controller/controller_state", self.joints_callback, 1)
+        self.joints_sub = node.create_subscription(
+            JointState,
+            "/elfin_arm_controller/controller_state",
+            self.joints_callback,
+            1,
+        )
         self.joints_pub = node.create_publisher(JointState, "joint_goal", 1)
-        self.ompl_planning_service = node.create_client(GetMotionPlan, "/ompl_planning_service")
+        self.ompl_planning_service = node.create_client(
+            GetMotionPlan, "/ompl_planning_service"
+        )
 
         self.joint_min_limits = [-3.14, -2.04, -2.61, -3.14, -2.56, -3.14]
         self.joint_max_limits = [3.14, 2.04, 2.61, 3.14, 2.56, 3.14]
@@ -439,7 +498,9 @@ class CmdMove(object):
                     return True
             else:
                 if count % 10 == 0:
-                    self.node.get_logger().info("Waiting for previous goal to be reached...")
+                    self.node.get_logger().info(
+                        "Waiting for previous goal to be reached..."
+                    )
                 count += 1
                 time.sleep(0.1)
         return False
@@ -451,19 +512,19 @@ class CmdMove(object):
             while self.joint_state is None and previous_joint_state is None:
                 self.node.get_logger().info("Waiting for joint state...")
                 time.sleep(1)
-            
+
             if previous_joint_state is not None:
                 theta_vals = np.array(previous_joint_state)
             else:
                 theta_vals = np.array(self.joint_state)
             response = requests.get(
-                    f"http://{OUTSOURCE_IP}:5001/move",
-                    json={
-                        "position": target_position,
-                        "orientation": target_orientation,
-                        "starting_joint_state": theta_vals.tolist(),
-                    },
-                )
+                f"http://{OUTSOURCE_IP}:5001/move",
+                json={
+                    "position": target_position,
+                    "orientation": target_orientation,
+                    "starting_joint_state": theta_vals.tolist(),
+                },
+            )
             if response.status_code == 200:
                 self.node.get_logger().info(f"{response.text}")
                 joints = response.json()["joints"]
@@ -476,6 +537,7 @@ class CmdMove(object):
         except requests.exceptions.RequestException as e:
             self.node.get_logger().warn(f"Computation failed: {e}")
         return []
+
 
 if __name__ == "__main__":
     rclpy.init()
@@ -495,7 +557,7 @@ if __name__ == "__main__":
         # (MOVE, None, None),
         # (MOVE, [-0.100, 0.520, 0.400], [-90, -112, 0]),
         # (MOVE, [-0.100, 0.620, 0.400], [-90, -112, 0]),
-        (GRIP, 1.5), # berry
+        (GRIP, 1.5),  # berry
         # (GRIP, 3), # ball
         # (MOVE, [-0.100, 0.620, 0.300], [-90, -112, 0]),
         # (GRIP, 1),
@@ -514,7 +576,11 @@ if __name__ == "__main__":
         for i, action in enumerate(actions):
             if action[0] == MOVE:
                 node.get_logger().info(f"Requesting joints for {i}")
-                joint_actions[i] = cm.move(action[1], action[2], None if last_idx == -1 else joint_actions[last_idx])
+                joint_actions[i] = cm.move(
+                    action[1],
+                    action[2],
+                    None if last_idx == -1 else joint_actions[last_idx],
+                )
                 node.get_logger().info(f"Received joints for {i}")
                 last_idx = i
 
@@ -536,7 +602,9 @@ if __name__ == "__main__":
             if p is None:
                 log_file.write(f"{time.time()},{MOVE},{','.join(['0']*6)},0\n")
             else:
-                log_file.write(f"{time.time()},{MOVE},{','.join([str(x) for x in p])},{','.join([str(x) for x in r])},0\n")
+                log_file.write(
+                    f"{time.time()},{MOVE},{','.join([str(x) for x in p])},{','.join([str(x) for x in r])},0\n"
+                )
             # cm.move(p, r)
             while i not in joint_actions:
                 time.sleep(0.1)

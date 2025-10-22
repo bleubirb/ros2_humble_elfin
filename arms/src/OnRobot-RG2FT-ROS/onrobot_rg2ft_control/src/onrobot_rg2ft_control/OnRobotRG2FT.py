@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import logging
+import struct
+
 from onrobot_rg2ft_control.OnRobotTcpClient import OnRobotTcpClient
 from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
-import struct
 
 RG2FT_MIN_WIDTH = 0
 RG2FT_MAX_WIDTH = 1000
@@ -11,11 +12,14 @@ RG2FT_MIN_FORCE = 0
 RG2FT_MAX_FORCE = 400
 RG2FT_DEVICE_ADDRESS = 65
 
+
 def s16(val):
-    return struct.unpack('h', struct.pack('H', val))[0]
+    return struct.unpack("h", struct.pack("H", val))[0]
+
 
 def u16(val):
-    return struct.unpack('H', struct.pack('h', val))[0]
+    return struct.unpack("H", struct.pack("h", val))[0]
+
 
 class OnRobotRG2FT:
 

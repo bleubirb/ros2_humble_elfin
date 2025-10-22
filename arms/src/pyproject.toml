@@ -1,0 +1,20 @@
+[tool.black]
+exclude = "venv|.venv|__pycache__"
+
+[tool.isort]
+profile = "black"
+
+[tool.autoflake]
+recursive = true
+expand-star-imports = true
+remove-all-unused-imports = true
+ignore-init-module-imports = true
+in-place = true
+exclude = "venv,.venv,__pycache__"
+
+[tool.mypy]
+follow_imports = "silent"
+disallow_untyped_defs = true
+warn_redundant_casts = true
+warn_no_return = true
+warn_unreachable = true
