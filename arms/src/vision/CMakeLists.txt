@@ -33,7 +33,11 @@ install(
 
 install(
   PROGRAMS
+  scripts/bestestboy.pth
   scripts/vision.py
+  scripts/detector.py
+  scripts/model.py
+  scripts/tracker.py
   DESTINATION
   lib/${PROJECT_NAME}
 )
