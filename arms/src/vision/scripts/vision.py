@@ -35,9 +35,7 @@ MAX_FPS = 0
 
 # output
 CSV_FN = "blueberries_tiled"
-DATA_PATH = os.path.join(
-    os.path.abspath(os.path.dirname(__file__)), "..", "..", "..", "data_cam"
-)
+DATA_PATH = "data_cam"
 TRACK_MAX_DIST = 60
 
 
@@ -66,13 +64,13 @@ class Vision:
 
         self.tracker = CentroidTracker(max_dist_px=TRACK_MAX_DIST)
 
-        filename = CSV_FN
-        i = 0
-        while os.path.exists(f"{filename}_{i}.csv"):
-            i += 1
-        filename = f"{filename}_{i}.csv"
+        if not os.path.exists(DATA_PATH):
+            os.makedirs(DATA_PATH)
+        f_idx = 0
+        while os.path.exists(f"{DATA_PATH}/{CSV_FN}_{f_idx}.csv"):
+            f_idx += 1
 
-        self.csv_file = open(os.path.join(DATA_PATH, filename), "w", newline="")
+        self.csv_file = open(f"{DATA_PATH}/{CSV_FN}_{f_idx}.csv", "w", newline="")
         self.csv_writer = csv.writer(self.csv_file)
         self.csv_writer.writerow(
             [
