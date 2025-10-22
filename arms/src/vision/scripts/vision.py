@@ -110,7 +110,7 @@ class Vision:
         )
 
         # detection (tiled or single)
-        dets_xywh, det_scores, det_labels = run_detector_tiled(
+        dets_xywh, det_scores, _ = run_detector_tiled(
             self.detector,
             cv_image,
             SCORE_THRESH,
