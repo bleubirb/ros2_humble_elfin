@@ -242,6 +242,10 @@ class Vision:
                 y0 = max(0, cy - wy)
                 y1 = min(height, cy + wy)
                 patch = Zmap[y0:y1, x0:x1]
+
+                self.node.get_logger().info(
+                    print(f"det {i} tid={tid} cx={cx} cy={cy} x0={x0} x1={x1} y0={y0} y1={y1} patch_size={patch.shape}")
+                )
                 if patch.size > 0:
                     Zm = float(np.nanmedian(patch))
                     if np.isfinite(Zm) and Zm > 0:
@@ -251,6 +255,8 @@ class Vision:
                         X = (u - cx0) * Zm / fx
                         Y = (v - cy0) * Zm / fx
                         depth_method = "stereo"
+                else:
+                    self.node.get_logger().info(f"Empty depth patch for detection {i} (tid={tid})")
 
             self.annotate_image(cv_image, x, y, w, h, tid, NAME, score, Zm)
             self.csv_writer.writerow(
