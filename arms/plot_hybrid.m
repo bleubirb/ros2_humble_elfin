@@ -34,8 +34,9 @@ data = {
     % "Move Test", 178, 204, false;
     % "Move Test 2", 182, 208, false;
     % "Move Test 3", 183, 209, false;
-    "Move Test 4", 184, 210, true;
-};
+    % "Move Test 4", 184, 210, false;
+    "Move Test 7", 188, 214, false;
+    };
 
 % Iterate over data
 for idx = 1:size(data, 1)
@@ -117,7 +118,7 @@ for idx = 1:size(data, 1)
         ylabel('State');
     yticks([-1, 0, 1, 2]);
     yticklabels({'L', 'H', 'T', 'M'});
-        xlim([25, 120]);
+        xlim([9, 120]);
         % title(sprintf('%s - Gripper State', title));
     end
 
@@ -153,7 +154,7 @@ for idx = 1:size(data, 1)
         xlabel('Time (s)');
         ylabel('Force (N)');
         ylim([-1, 3]);
-        xlim([25, 120]);
+        xlim([9, 120]);
         % title(sprintf('%s - Gripper Force', title));
     end
 
