@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import os
+import sys
+import time
 
 # from geometry_msgs.msg import Wrench, PoseStamped, PoseArray, Pose
 import threading
@@ -12,6 +14,10 @@ import numpy as np
 import rclpy
 import rclpy.node
 import requests
+from pathlib import Path
+import pandas as pd
+from collections import deque
+from sklearn.cluster import KMeans
 
 # from control_msgs.msg import JointTrajectoryControllerState
 from moveit_msgs.srv import GetMotionPlan
@@ -40,6 +46,15 @@ class PNS_Driver:
         self.fd = 0
         self.done = True
         self.shutdown = False
+        self.lambda_factor = 0.99
+        self.P = 1000 * np.eye(2)
+        self.theta = np.zeros((2, 1))
+        self.initialized = False
+        self.last_t = None
+        self.last_x = None
+        self.last_F = None
+        self.threshold_unripe = 0.37 # N/mm # thresholds found from kmeans clustering on spring constant estimates
+        self.threshold_overripe = 0.01 # N/mm
 
         # self.enable_drift_comp = node.declare_parameter("enable_drift_comp", True).get_parameter_value().bool_value
         # self.enable_online_rebaselining = node.declare_parameter("enable_online_rebaselining", True).get_parameter_value().bool_value
@@ -62,6 +77,46 @@ class PNS_Driver:
         self.shutdown = True
         self.thread.join()
 
+    def update_rls(self, t, x, F):
+        if not self.initialized:
+            self.last_t = t
+            self.last_x = x
+            self.last_F = F
+            self.initialized = True
+            return None, None, None, None
+
+        dt = t - self.last_t
+        if np.isclose(dt, 0, atol=1e-6):
+            return None, None, None, None
+        
+        v = (x - self.last_x) / dt
+        phi = np.array([[x], [v]])
+
+        F_pred = float(self.theta.T @ phi)
+        error = F - F_pred
+
+        gain = (self.P @ phi) / (self.lambda_factor + (phi.T @ self.P @ phi))
+        self.theta = self.theta + gain * error
+
+        self.P = (self.P - gain @ phi.T @ self.P) / self.lambda_factor
+
+        self.last_t = t
+        self.last_x = x
+        self.last_F = F
+
+        k, c = self.theta.flatten()
+        return k, c, F_pred, error
+    
+    def classify(self, k):
+        if k is None:
+            return "unknown"
+        if k > self.threshold_unripe:
+            return "unripe"
+        elif k < self.threshold_overripe <= k <= self.threshold_unripe:
+            return "ripe"
+        else:
+            return "overripe"
+        
     def loop(self):
         LOOP_FREQ = 100  # Hz
         PERIOD = 1.0 / LOOP_FREQ
@@ -255,6 +310,12 @@ class PNS_Driver:
             if len(force_range) > MOVING_AVG_LEN_FORCE:
                 force_range.pop(0)
             force_avg = mean(force_range)
+
+            [k, c, F_pred, error] = self.update_rls(time.time(), width, force_avg)
+            fruit_state = self.classify(k)
+            self.node.get_logger().info(
+                f"Estimated spring constant: {k:.3f} N/mm, fruit state: {fruit_state}"
+            )
 
             force_error = desired_force - force_avg
 

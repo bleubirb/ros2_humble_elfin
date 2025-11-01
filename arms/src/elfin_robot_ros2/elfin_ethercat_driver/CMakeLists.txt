@@ -115,13 +115,4 @@ install(
     share/${PROJECT_NAME}
 )
 
-install(TARGETS ${PROJECT_NAME}_lib EXPORT ${PROJECT_NAME}
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
-
-ament_export_include_directories("include")
-ament_export_libraries(${PROJECT_NAME}_lib)
-
 ament_package()
