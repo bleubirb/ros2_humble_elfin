@@ -198,13 +198,18 @@ class Vision:
 
         # pop images and parameters from dicts
         cv_image = self.color_dict.pop(color_ts)
+
+        resize_img = cv2.resize(cv_image, (640, 480))
         
-        height, width, _ = cv_image.shape
+        # height, width, _ = cv_image.shape
+        height = 480
+        width = 640
+        self.node.get_logger().info(f"disp image shape: {disp_image.shape}, cv_image shape: {resize_img.shape}")
 
         # detection (tiled)
         dets_xywh, det_scores, _ = run_detector_tiled(
             self.detector,
-            cv_image,
+            resize_img,
             SCORE_THRESH,
             TILE_ROWS,
             TILE_COLS,
@@ -215,6 +220,7 @@ class Vision:
 
         Zmap = None
         if not NO_DEPTH:
+            self.node.get_logger().info("Computing depth map from disparity...")
             Zmap = self.disparity_to_depth_m(
                 disp_image,
                 scale,
@@ -223,6 +229,7 @@ class Vision:
                 baseline_m,
                 invalid_value,
             )
+            self.node.get_logger().info(f"zmap: {Zmap.shape}")
 
         for i, xywh in enumerate(dets_xywh):
             x, y, w, h = map(int, xywh)
@@ -234,31 +241,44 @@ class Vision:
             X = Y = Zm = None
             depth_method = ""
             if Zmap is not None:
+                self.node.get_logger().info(f"Extracting depth for detection {i} (tid={tid})")
                 cx, cy = int(round(u)), int(round(v))
                 wx = max(1, int(round(w * 0.2)))
                 wy = max(1, int(round(h * 0.2)))
                 x0 = max(0, cx - wx)
                 x1 = min(width, cx + wx)
                 y0 = max(0, cy - wy)
+                # y0 = cy - wy
                 y1 = min(height, cy + wy)
+                # reshape x0, x1, y0, y1 to be within image bounds
+                # x0 = max(0, min(x0, width))
+                # x1 = max(0, min(x1, width))
+                # y0 = max(0, min(y0, height))
+                # y1 = max(0, min(y1, height))
                 patch = Zmap[y0:y1, x0:x1]
+                # self.node.get_logger().info(f"slice: {Zmap[y0:y1]}, {Zmap[x0:x1]}, patch shape: {patch.shape}")
 
-                self.node.get_logger().info(
-                    print(f"det {i} tid={tid} cx={cx} cy={cy} x0={x0} x1={x1} y0={y0} y1={y1} patch_size={patch.shape}")
-                )
+                # self.node.get_logger().info(
+                #     f"det {i} tid={tid} cx={cx} cy={cy} x0={x0} x1={x1} y0={y0} y1={y1} patch_size={patch}"
+                # )
                 if patch.size > 0:
                     Zm = float(np.nanmedian(patch))
+                    # self.node.get_logger().info(f"Depth patch median Zm={Zm}m for detection {i} (tid={tid})")
                     if np.isfinite(Zm) and Zm > 0:
                         fx = float(focal_px)
                         cx0 = float(self.principal_point_u)
                         cy0 = float(self.principal_point_v)
-                        X = (u - cx0) * Zm / fx
-                        Y = (v - cy0) * Zm / fx
+                        Xcam = ((u - cx0) * Zm) / fx # 0.04 m = 22 inch
+                        Ycam = ((v - cy0) * Zm) / fx
+                        
                         depth_method = "stereo"
+                        self.node.get_logger().info(
+                            f"Detection {i} (tid={tid}): X={X:.4f}m, Y={Y:.4f}m, Z={Zm:.4f}m"
+                        )
                 else:
                     self.node.get_logger().info(f"Empty depth patch for detection {i} (tid={tid})")
 
-            self.annotate_image(cv_image, x, y, w, h, tid, NAME, score, Zm)
+            self.annotate_image(resize_img, x, y, w, h, tid, NAME, score, Zm)
             self.csv_writer.writerow(
                 [
                     self.frame,
@@ -272,9 +292,9 @@ class Vision:
                     y,
                     x + w,
                     y + h,
-                    "" if X is None else f"{X:.4f}",
-                    "" if Y is None else f"{Y:.4f}",
-                    "" if Zm is None else f"{Zm:.4f}",
+                    "None" if X is None else f"{X:.4f}",
+                    "None" if Y is None else f"{Y:.4f}",
+                    "None" if Zm is None else f"{Zm:.4f}",
                     depth_method,
                 ]
             )
@@ -288,7 +308,7 @@ class Vision:
         self.frame += 1
 
         # Stream processed image back to publisher
-        processed_img_msg: Image = self.br.cv2_to_imgmsg(cv_image, encoding="bgr8")
+        processed_img_msg: Image = self.br.cv2_to_imgmsg(resize_img, encoding="bgr8")
         processed_img_msg.header.stamp.sec = int(disp_ts)
         processed_img_msg.header.stamp.nanosec = int((disp_ts - int(disp_ts)) * 1e9)
         self.processed_pub.publish(processed_img_msg)
@@ -312,14 +332,17 @@ class Vision:
         invalid_value: float,
     ) -> np.ndarray:
         d = (disp_u16.astype(np.float32) / float(scale)) + float(offset)
-        d[d <= max(1e-9, float(invalid_value))] = np.nan
+        d[d <= max(1e-12, float(invalid_value))] = np.nan
+        # focal_px = 7.0
+        # baseline_m = 0.12
+        self.node.get_logger().info(f"Disparity stats: {float(focal_px) * float(baseline_m) / d}")
         return (float(focal_px) * float(baseline_m)) / d
 
     def annotate_image(self, cv_image, x, y, w, h, tid, name, score, Zm=None) -> None:
         color = (0, 220, 0) if Zm is not None else (80, 80, 80)
         cv2.rectangle(cv_image, (x, y), (x + w, y + h), color, 2)
         label = f"id {tid}  {name} {score:.2f}" + (
-            f"  Z={Zm:.2f}m" if Zm is not None else ""
+            f"  Z={Zm:.2f}m" if Zm is not None else "None"
         )
         cv2.putText(
             cv_image,
