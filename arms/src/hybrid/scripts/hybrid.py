@@ -16,8 +16,8 @@ import rclpy.node
 import requests
 from pathlib import Path
 import pandas as pd
-from collections import deque
-from sklearn.cluster import KMeans
+# from collections import deque
+# from sklearn.cluster import KMeans
 
 # from control_msgs.msg import JointTrajectoryControllerState
 from moveit_msgs.srv import GetMotionPlan
@@ -46,19 +46,25 @@ class PNS_Driver:
         self.fd = 0
         self.done = True
         self.shutdown = False
-        self.lambda_factor = 0.99
+        self.lambda_factor = 0.98
         self.P = 1000 * np.eye(2)
         self.theta = np.zeros((2, 1))
+        self.x0 = None
+        self.force_scale = 1.0
         self.initialized = False
         self.last_t = None
         self.last_x = None
         self.last_F = None
-        self.threshold_unripe = 0.37 # N/mm # thresholds found from kmeans clustering on spring constant estimates
-        self.threshold_overripe = 0.01 # N/mm
-
-        # self.enable_drift_comp = node.declare_parameter("enable_drift_comp", True).get_parameter_value().bool_value
-        # self.enable_online_rebaselining = node.declare_parameter("enable_online_rebaselining", True).get_parameter_value().bool_value
-        # self.rebaselining_alpha = node.declare_parameter("rebaselining_alpha", 1e-3).get_parameter_value().double_value
+        
+        self.rls_alpha = 0.5
+        self.compression_ema = None
+        self.force_ema = None
+        self.last_compression_ema = None
+        self.contact_counter = 0
+        self.contact_required = 3 
+        self.max_error_ratio = 0.5 # reject updates with error > 50% of force
+        self.threshold_unripe = 0.06
+        self.threshold_overripe = 0.015
 
         self.thread = threading.Thread(target=self.loop)
         self.thread.start()
@@ -82,18 +88,59 @@ class PNS_Driver:
             self.last_t = t
             self.last_x = x
             self.last_F = F
+            if self.x0 is None:
+                self.x0 = x
             self.initialized = True
             return None, None, None, None
 
         dt = t - self.last_t
         if np.isclose(dt, 0, atol=1e-6):
             return None, None, None, None
-        
-        v = (x - self.last_x) / dt
-        phi = np.array([[x], [v]])
 
-        F_pred = float(self.theta.T @ phi)
-        error = F - F_pred
+        # v = (x - self.last_x) / dt
+
+        compression = (self.x0 - x) if self.x0 is not None else -x
+        # small-contact guard: if measured force is tiny, skip updating to avoid bias
+        F_scaled = F / self.force_scale if self.force_scale != 1.0 else F
+        CONTACT_THRESHOLD_N = 0.15
+        if F_scaled < CONTACT_THRESHOLD_N:
+            # not in contact, reset contact counter and skip update
+            self.last_t = t
+            self.last_x = x
+            self.last_F = F
+            return None, None, None, None
+
+        # in contact, increment contact counter for contact_required consecutive samples, avoiding chatter responses
+        self.contact_counter = min(self.contact_required, self.contact_counter + 1)
+
+        # EMA for velocity
+        if self.compression_ema is None:
+            self.compression_ema = compression
+            self.last_compression_ema = compression
+        else:
+            self.compression_ema = (
+                self.rls_alpha * compression + (1 - self.rls_alpha) * self.compression_ema
+            )
+
+        if self.force_ema is None:
+            self.force_ema = F_scaled
+        else:
+            self.force_ema = self.rls_alpha * F_scaled + (1 - self.rls_alpha) * self.force_ema
+
+        if self.contact_counter < self.contact_required:
+            # refresh last values to avoid large dt on next iteration
+            self.last_t = t
+            self.last_x = x
+            self.last_F = F
+            return None, None, None, None
+
+        v_smooth = (
+            (self.compression_ema - self.last_compression_ema) / dt if dt > 0 else 0.0
+        )
+        phi = np.array([[self.compression_ema], [v_smooth]])
+
+        F_pred = float(self.theta.T @ phi) # F = k * compression + c * v_smooth
+        error = F_scaled - F_pred
 
         gain = (self.P @ phi) / (self.lambda_factor + (phi.T @ self.P @ phi))
         self.theta = self.theta + gain * error
@@ -104,15 +151,21 @@ class PNS_Driver:
         self.last_x = x
         self.last_F = F
 
+        if abs(error) > max(self.max_error_ratio * max(1e-6, F_scaled), 0.1):
+            self.last_t = t
+            self.last_x = x
+            self.last_F = F
+            self.last_compression_ema = self.compression_ema
+            return None, None, F_pred, error
         k, c = self.theta.flatten()
         return k, c, F_pred, error
-    
+
     def classify(self, k):
         if k is None:
             return "unknown"
         if k > self.threshold_unripe:
             return "unripe"
-        elif k < self.threshold_overripe <= k <= self.threshold_unripe:
+        elif k >= self.threshold_overripe and k <= self.threshold_unripe:
             return "ripe"
         else:
             return "overripe"
@@ -127,12 +180,12 @@ class PNS_Driver:
         desired_force = 0
         last_prox = 1000
 
-        MIN_HOLD_TIME = 300  # hold for 5 minutes -> testing temperature sensor drift
+        MIN_HOLD_TIME = 10  # hold for 5 minutes -> testing temperature sensor drift
         MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
 
-        # OPEN_WIDTH = 1000 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
+        OPEN_WIDTH = 400 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
-        OPEN_WIDTH = 670  # only for water bottle experiment
+        # OPEN_WIDTH = 670  # only for water bottle experiment
 
         # states for gripper control
         MOVE = 4
@@ -147,7 +200,7 @@ class PNS_Driver:
         FAR = 500
         CLOSE = 300
 
-        MOVING_AVG_LEN_FORCE = 100
+        MOVING_AVG_LEN_FORCE = 50
         MOVING_AVG_LEN_PROX = 100
         MOVING_AVG_LEN_K = 100
 
@@ -304,18 +357,13 @@ class PNS_Driver:
             l_force = l_force_raw - l_force_bias - l_force_drift * loop_counter
             r_force = r_force_raw - r_force_bias - r_force_drift * loop_counter
 
-            force = (l_force_raw + r_force_raw) / 2 / 10
+            force = (l_force_raw + r_force_raw) / 2 /  10
 
             force_range.append(force)
             if len(force_range) > MOVING_AVG_LEN_FORCE:
                 force_range.pop(0)
             force_avg = mean(force_range)
 
-            [k, c, F_pred, error] = self.update_rls(time.time(), width, force_avg)
-            fruit_state = self.classify(k)
-            self.node.get_logger().info(
-                f"Estimated spring constant: {k:.3f} N/mm, fruit state: {fruit_state}"
-            )
 
             force_error = desired_force - force_avg
 
@@ -331,7 +379,7 @@ class PNS_Driver:
                     <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2
                 ):
                     q = TIGHTEN_FAST
-                    # contact = False
+                    contact = False
                 elif (
                     ProxAvg < FAR
                     and ProxAvg > CLOSE
@@ -339,9 +387,15 @@ class PNS_Driver:
                     <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2
                 ):
                     q = TIGHTEN_FAST
-                    # contact = False
+                    contact = False
                 else:
-                    # contact = True
+                    try:
+                        if contact == False:
+                            self.x0 = width
+                            self.node.get_logger().info(f"Baseline width (x0) set to {self.x0:.2f}")
+                    except Exception:
+                        pass
+                    contact = True
                     # record current width
                     # diameter_approx = state.actual_gripper_width
                     if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (
@@ -360,6 +414,14 @@ class PNS_Driver:
                         q = HOLD
 
                 # for parameter estimation of spring constant (remove if no estimation)
+                    [k, c, F_pred, error] = self.update_rls(time.time(), width, force_avg)
+                    fruit_state = self.classify(k)
+                    if k is None:
+                        self.node.get_logger().info("Estimated spring constant: unknown")
+                    else:
+                        self.node.get_logger().info(
+                            f"Estimated spring constant: {k:.5f} N/mm, fruit state: {fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
+                        )
                 # if contact:
                 #     if not self.done:
                 #         if force_avg > 0:
@@ -387,11 +449,11 @@ class PNS_Driver:
                 if q == HOLD:
                     pass
                 elif q == TIGHTEN:  # move smaller
-                    tmp_width -= SPEED_NORMAL
+                    tmp_width -= SPEED_SLOW
                 elif q == LOOSEN:
-                    tmp_width += SPEED_NORMAL
+                    tmp_width += SPEED_SLOW
                 elif q == TIGHTEN_FAST:
-                    tmp_width -= SPEED_FAST
+                    tmp_width -= SPEED_NORMAL
                 elif q == LOOSEN_SLOW:
                     tmp_width += SPEED_SLOW
                 elif q == TIGHTEN_SLOW:
@@ -462,6 +524,8 @@ class PNS_Driver:
                         f"Force calibration complete! l_force_drift: {l_force_drift:.6f} per loop, r_force_drift: {r_force_drift:.6f} per loop\n Bias left: {l_force_bias:.6f}, Bias right: {r_force_bias:.6f}\n"
                     )
                     calibrated = True
+                    # set baseline open width for compression calculation
+                    
 
             # if self.enable_drift_comp and self.enable_online_rebaselining:
             #     no_contact = desired_force == 0 and (ProxAvg > FAR or cmd.target_width >= OPEN_WIDTH - OPEN_HOLD_TOLERANCE)
@@ -618,7 +682,7 @@ if __name__ == "__main__":
         # (MOVE, None, None),
         # (MOVE, [-0.100, 0.520, 0.400], [-90, -112, 0]),
         # (MOVE, [-0.100, 0.620, 0.400], [-90, -112, 0]),
-        (GRIP, 1.5),  # berry
+        (GRIP, 1),  # berry
         # (GRIP, 3), # ball
         # (MOVE, [-0.100, 0.620, 0.300], [-90, -112, 0]),
         # (GRIP, 1),
