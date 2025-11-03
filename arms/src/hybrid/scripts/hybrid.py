@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 import time
 
 # from geometry_msgs.msg import Wrench, PoseStamped, PoseArray, Pose
@@ -12,10 +11,7 @@ from statistics import mean
 
 import numpy as np
 import rclpy
-import rclpy.node
 import requests
-from pathlib import Path
-import pandas as pd
 # from collections import deque
 # from sklearn.cluster import KMeans
 
@@ -28,11 +24,19 @@ from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
 from sensor_msgs.msg import JointState
 
 # import move_solver as ms
+from helpers import DataRecorder, DataBucket
 
 OUTSOURCE_IP = (
     "127.0.0.1"  # should not need with new computer, adds latency for requests
 )
 # implement move_solver
+
+LAMBDA_FACTOR = 0.98
+FORCE_SCALE = 1.0
+CONTACT_REQUIRED = 3 
+MAX_ERROR_RATIO = 0.5 # reject updates with error > 50% of force
+THRESHOLD_UNRIPE = 0.06
+THRESHOLD_OVERRIPE = 0.015
 
 
 class PNS_Driver:
@@ -46,11 +50,9 @@ class PNS_Driver:
         self.fd = 0
         self.done = True
         self.shutdown = False
-        self.lambda_factor = 0.98
         self.P = 1000 * np.eye(2)
         self.theta = np.zeros((2, 1))
         self.x0 = None
-        self.force_scale = 1.0
         self.initialized = False
         self.last_t = None
         self.last_x = None
@@ -61,13 +63,11 @@ class PNS_Driver:
         self.force_ema = None
         self.last_compression_ema = None
         self.contact_counter = 0
-        self.contact_required = 3 
-        self.max_error_ratio = 0.5 # reject updates with error > 50% of force
-        self.threshold_unripe = 0.06
-        self.threshold_overripe = 0.015
 
         self.thread = threading.Thread(target=self.loop)
         self.thread.start()
+
+        self.data = DataRecorder()
 
     def callback(self, data):
         self.node.get_logger().info(f"I heard {data.data}")
@@ -101,7 +101,7 @@ class PNS_Driver:
 
         compression = (self.x0 - x) if self.x0 is not None else -x
         # small-contact guard: if measured force is tiny, skip updating to avoid bias
-        F_scaled = F / self.force_scale if self.force_scale != 1.0 else F
+        F_scaled = F / FORCE_SCALE if FORCE_SCALE != 1.0 else F
         CONTACT_THRESHOLD_N = 0.15
         if F_scaled < CONTACT_THRESHOLD_N:
             # not in contact, reset contact counter and skip update
@@ -111,7 +111,7 @@ class PNS_Driver:
             return None, None, None, None
 
         # in contact, increment contact counter for contact_required consecutive samples, avoiding chatter responses
-        self.contact_counter = min(self.contact_required, self.contact_counter + 1)
+        self.contact_counter = min(CONTACT_REQUIRED, self.contact_counter + 1)
 
         # EMA for velocity
         if self.compression_ema is None:
@@ -127,7 +127,7 @@ class PNS_Driver:
         else:
             self.force_ema = self.rls_alpha * F_scaled + (1 - self.rls_alpha) * self.force_ema
 
-        if self.contact_counter < self.contact_required:
+        if self.contact_counter < CONTACT_REQUIRED:
             # refresh last values to avoid large dt on next iteration
             self.last_t = t
             self.last_x = x
@@ -142,16 +142,16 @@ class PNS_Driver:
         F_pred = float(self.theta.T @ phi) # F = k * compression + c * v_smooth
         error = F_scaled - F_pred
 
-        gain = (self.P @ phi) / (self.lambda_factor + (phi.T @ self.P @ phi))
+        gain = (self.P @ phi) / (LAMBDA_FACTOR + (phi.T @ self.P @ phi))
         self.theta = self.theta + gain * error
 
-        self.P = (self.P - gain @ phi.T @ self.P) / self.lambda_factor
+        self.P = (self.P - gain @ phi.T @ self.P) / LAMBDA_FACTOR
 
         self.last_t = t
         self.last_x = x
         self.last_F = F
 
-        if abs(error) > max(self.max_error_ratio * max(1e-6, F_scaled), 0.1):
+        if abs(error) > max(self.MAX_ERROR_RATIO * max(1e-6, F_scaled), 0.1):
             self.last_t = t
             self.last_x = x
             self.last_F = F
@@ -163,9 +163,9 @@ class PNS_Driver:
     def classify(self, k):
         if k is None:
             return "unknown"
-        if k > self.threshold_unripe:
+        elif k > THRESHOLD_UNRIPE:
             return "unripe"
-        elif k >= self.threshold_overripe and k <= self.threshold_unripe:
+        elif k >= THRESHOLD_OVERRIPE and k <= THRESHOLD_UNRIPE:
             return "ripe"
         else:
             return "overripe"
@@ -230,18 +230,6 @@ class PNS_Driver:
         reached_hold_time = float("inf")
         start_time = float("inf")
 
-        k_filter = []
-        time_data = []
-        hold_time_data = []
-        force_data = []
-        fd_data = []
-        state_data = []
-        width_data = []
-        cmd_width_data = []
-        prox_data = []
-        raw_fz_l_data = []
-        raw_fz_r_data = []
-
         CALIBRATION_TIME = 5  # seconds
 
         calibrated = False
@@ -258,10 +246,14 @@ class PNS_Driver:
             loop_start_time = time.time()
             state = self.gripper.readState()
 
+            bucket = DataBucket(time=loop_start_time, cmd_width=last_target)
+
             if self.fd != desired_force:
                 desired_force = self.fd
                 reached_hold_time = float("inf")
                 start_time = time.time()
+
+            bucket.fd = desired_force
 
             cmd = RG2FTCommand()
             tmp_width = last_target  # mm
@@ -280,6 +272,7 @@ class PNS_Driver:
             ProxL = mean(prox_l_range)
             ProxR = mean(prox_r_range)
             width = mean(width_range)
+            bucket.width = width
 
             # if cmd.target_width == 0:
             #     cmd.target_width = int(max(0, min(65535, round(width))))
@@ -287,6 +280,7 @@ class PNS_Driver:
             ProxAvg = (
                 ProxL + ProxR
             ) / 2  # divide by two due to width between two fingers (find midpoint)
+            bucket.prox = ProxAvg
 
             if (
                 mean([state.proximity_value_l, state.proximity_value_r]) - last_prox
@@ -316,16 +310,8 @@ class PNS_Driver:
                 delay_start_time = time.time()
 
                 while time.time() - delay_start_time < 5:
-                    time_data.append(time.time())
-                    hold_time_data.append(0)
-                    force_data.append(0)
-                    fd_data.append(desired_force)
-                    state_data.append(q)
-                    width_data.append(width)
-                    cmd_width_data.append(last_target)
-                    prox_data.append(ProxAvg)
-                    raw_fz_l_data.append(0)
-                    raw_fz_r_data.append(0)
+                    tmp_bucket = DataBucket(time=time.time(), fd=desired_force, state=q, width=width, cmd_width=last_target, prox=ProxAvg)
+                    self.data.record(tmp_bucket)
 
                     time.sleep(PERIOD)
                     loop_counter += 1
@@ -346,6 +332,9 @@ class PNS_Driver:
             l_force_raw = abs(state.fz_l)
             r_force_raw = abs(state.fz_r)
 
+            bucket.raw_fz_l = l_force_raw
+            bucket.raw_fz_r = r_force_raw
+
             # if calibrated and self.enable_drift_comp:
             #     loops_since_baseline = max(0, loop_counter - baseline_loop_counter)
             #     l_force = l_force_raw - l_force_bias - l_force_drift * loops_since_baseline
@@ -363,7 +352,7 @@ class PNS_Driver:
             if len(force_range) > MOVING_AVG_LEN_FORCE:
                 force_range.pop(0)
             force_avg = mean(force_range)
-
+            bucket.force = force_avg
 
             force_error = desired_force - force_avg
 
@@ -389,12 +378,9 @@ class PNS_Driver:
                     q = TIGHTEN_FAST
                     contact = False
                 else:
-                    try:
-                        if contact == False:
-                            self.x0 = width
-                            self.node.get_logger().info(f"Baseline width (x0) set to {self.x0:.2f}")
-                    except Exception:
-                        pass
+                    if contact == False:
+                        self.x0 = width
+                        self.node.get_logger().info(f"Baseline width (x0) set to {self.x0:.2f}")
                     contact = True
                     # record current width
                     # diameter_approx = state.actual_gripper_width
@@ -413,35 +399,21 @@ class PNS_Driver:
                         reached_hold_time = time.time()
                         q = HOLD
 
-                # for parameter estimation of spring constant (remove if no estimation)
+                    # for parameter estimation of spring constant (remove if no estimation)
                     [k, c, F_pred, error] = self.update_rls(time.time(), width, force_avg)
                     fruit_state = self.classify(k)
+                    bucket.k = k
+                    bucket.F_pred = F_pred
+                    bucket.rls_error = error
+                    bucket.classification = fruit_state
                     if k is None:
                         self.node.get_logger().info("Estimated spring constant: unknown")
                     else:
                         self.node.get_logger().info(
                             f"Estimated spring constant: {k:.5f} N/mm, fruit state: {fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
                         )
-                # if contact:
-                #     if not self.done:
-                #         if force_avg > 0:
-                #             compression = diameter_approx - width
-                #             if compression != 0:
-                #                 k = (desired_force - force_avg) / compression
-                #                 # putting into moving average filter to make more readable
-                #                 # k_filter.append(k)
-                #                 # if len(k_filter) > MOVING_AVG_LEN_K:
-                #                 #     k_filter.pop(0)
-                #                 # k = mean(k_filter)
-                #                 # self.node.get_logger().info(f"Estimated spring constant: {k:.2f} N/mm")
-                #             else:
-                #                 k = None
-                # # if k is valid, adjust target width to achieve desired force
-                # if contact and force_avg > 0 and k is not None:
-                #     # hooke's law: F = k * (x0 - x), solve for x0 (cmd.target_width)
-                #     # x is diameter_approx
-                #     test = diameter_approx + (force_avg / k)
-                #     self.node.get_logger().info(f"target width: {test} mm and current width: {tmp_width} mm, current force: {force_avg}, force: {force}, q state: {q}")
+
+                bucket.state = q
 
                 if q != HOLD:
                     reached_hold_time = float("inf")
@@ -468,19 +440,10 @@ class PNS_Driver:
                     f"prox: {ProxAvg:.2f}, target width: {tmp_width:.2f}, current force: {force_avg:.2f}, force: {force:.2f}, q state: {q}, raw fz_l: {l_force_raw:.2f}, raw fz_r: {r_force_raw:.2f}"
                 )
 
+            bucket.hold_time = reached_hold_time if reached_hold_time != float("inf") else 0
+
             if calibrated:
-                time_data.append(time.time())
-                hold_time_data.append(
-                    0 if reached_hold_time > time.time() else reached_hold_time
-                )
-                force_data.append(force_avg)
-                fd_data.append(desired_force)
-                state_data.append(q)
-                width_data.append(width)
-                cmd_width_data.append(last_target)
-                prox_data.append(ProxAvg)
-                raw_fz_l_data.append(l_force_raw)
-                raw_fz_r_data.append(r_force_raw)
+                self.data.record(bucket)
 
             cmd.target_width = int(round(tmp_width))
             # cmd.target_force = int(round(cmd.target_force))
@@ -556,20 +519,7 @@ class PNS_Driver:
 
             loop_counter += 1
 
-        if not os.path.exists("data"):
-            os.makedirs("data")
-        f_idx = 0
-        while os.path.exists(f"data/hybrid_gripper_{f_idx}.csv"):
-            f_idx += 1
-        with open(f"data/hybrid_gripper_{f_idx}.csv", "w") as f:
-            f.write(
-                "Time,ReachedHoldTime,Force,DesiredForce,State,ActualWidth,CommandWidth,Proximity,RawFzL,RawFzR\n"
-            )
-            for i in range(len(time_data)):
-                f.write(
-                    f"{time_data[i]},{hold_time_data[i]},{force_data[i]},{fd_data[i]},{state_data[i]},{width_data[i]},{cmd_width_data[i]},{prox_data[i]},{raw_fz_l_data[i]},{raw_fz_r_data[i]}\n"
-                )
-        self.node.get_logger().info(f"Data saved to data/hybrid_gripper_{f_idx}.csv")
+        self.data.save()
 
 
 class CmdMove(object):
