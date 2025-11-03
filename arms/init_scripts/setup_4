@@ -1,0 +1,4 @@
+#!/bin/bash
+
+source ../install/setup.bash
+ros2 launch elfin_basic_api elfin_gui.launch.py > $1 2>&1

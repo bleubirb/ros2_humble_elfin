@@ -1,0 +1,4 @@
+#!/bin/bash
+
+source ../install/setup.bash
+ros2 launch elfin3_ros2_moveit2 elfin3_moveit_rviz.launch.py > $1 2>&1

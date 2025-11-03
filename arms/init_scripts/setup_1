@@ -1,0 +1,3 @@
+#!/bin/bash
+
+sudo chrt 10 ./setup_1a $1
