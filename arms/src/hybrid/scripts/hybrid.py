@@ -36,8 +36,10 @@ FORCE_SCALE = 1.0
 CONTACT_REQUIRED = 3 
 MAX_ERROR_RATIO = 0.5 # reject updates with error > 50% of force
 THRESHOLD_UNRIPE = 0.06
-THRESHOLD_OVERRIPE = 0.03
-
+THRESHOLD_OVERRIPE = 0.01
+MIN_BERRY_WIDTH = 50 # mm, min width to consider for berry
+MAX_BERRY_WIDTH = 200 # mm, max width to consider for berry
+MIN_WIDTH_EXIT_LOOPS = 5 # number of loops with width below min to exit force control
 
 class PNS_Driver:
     def __init__(self, node, ip, port):
@@ -50,8 +52,10 @@ class PNS_Driver:
         self.fd = 0
         self.done = True
         self.shutdown = False
-        self.P = 1000 * np.eye(2)
-        self.theta = np.zeros((2, 1))
+        # self.P = 1000 * np.eye(2)
+        self.P = 1000 * np.eye(1)
+        # self.theta = np.zeros((2, 1))
+        self.theta = np.zeros((1, 1))
         self.x0 = None
         self.initialized = False
         self.last_t = None
@@ -90,11 +94,13 @@ class PNS_Driver:
             self.last_F = F
             
             self.initialized = True
-            return None, None, None, None
+            # return None, None, None, None
+            return None, None, None
 
         dt = t - self.last_t
         if np.isclose(dt, 0, atol=1e-6) or dt < 0:
-            return None, None, None, None
+            # return None, None, None, None
+            return None, None, None
 
         # v = (x - self.last_x) / dt
 
@@ -109,9 +115,14 @@ class PNS_Driver:
             self.last_F = F
             # self.x0 = None
             self.contact_counter = 0
-            return None, None, None, None
+            # return None, None, None, None
+            return None, None, None
         
         if self.x0 is None:
+            if x < MIN_BERRY_WIDTH:
+                self.node.get_logger().info("Initial gripper width too small, berry is likely overripe.")
+                return 0, None, None
+            
             self.x0 = x
             self.node.get_logger().info(f"Baseline width (x0) set to {self.x0:.2f}")
 
@@ -137,12 +148,14 @@ class PNS_Driver:
             self.last_t = t
             self.last_x = x
             self.last_F = F
-            return None, None, None, None
+            # return None, None, None, None
+            return None, None, None
 
-        v_smooth = (
-            (self.compression_ema - self.last_compression_ema) / dt
-        )
-        phi = np.array([[self.compression_ema], [v_smooth]])
+        # v_smooth = (
+        #     (self.compression_ema - self.last_compression_ema) / dt
+        # )
+        # phi = np.array([[self.compression_ema], [v_smooth]])
+        phi = np.array([[self.compression_ema]])
 
         F_pred = float((self.theta.T @ phi).item()) # F = k * compression + c * v_smooth
         error = self.force_ema - F_pred
@@ -161,10 +174,13 @@ class PNS_Driver:
             self.last_x = x
             self.last_F = F
             self.last_compression_ema = self.compression_ema
-            return None, None, F_pred, error
+            # return None, None, F_pred, error
+            return None, F_pred, error
         
-        k, c = self.theta.flatten()
-        return k, c, F_pred, error
+        # k, c = self.theta.flatten()
+        # return k, c, F_pred, error
+        k = self.theta.item()
+        return k, F_pred, error
 
     def classify(self, k):
         if k is None:
@@ -244,6 +260,8 @@ class PNS_Driver:
         l_force_drift = 0.0  # per loop increment
         r_force_drift = 0.0  # per loop increment
         # baseline_loop_counter = 0  # loop index at last calibration/rebaseline
+
+        min_width_exit_counter = 0
 
         tmp_width = 0
 
@@ -406,19 +424,28 @@ class PNS_Driver:
                         q = HOLD
 
                     # for parameter estimation of spring constant (remove if no estimation)
-                    [k, c, F_pred, error] = self.update_rls(time.time(), width, force_avg)
-                    fruit_state = self.classify(k)
-                    bucket.k = k
-                    bucket.F_pred = F_pred
-                    bucket.rls_error = error
-                    bucket.baseline_w = self.x0 if self.x0 is not None else 0.0
-                    bucket.classification = fruit_state
-                    if k is None:
-                        self.node.get_logger().info("Estimated spring constant: unknown")
+                    if width < MAX_BERRY_WIDTH:
+                        # [k, _, F_pred, error] = self.update_rls(time.time(), width, force_avg)
+                        [k, F_pred, error] = self.update_rls(time.time(), width, force_avg)
+                        fruit_state = self.classify(k)
+                        bucket.k = k
+                        bucket.F_pred = F_pred
+                        bucket.rls_error = error
+                        bucket.baseline_w = self.x0 if self.x0 is not None else 0.0
+                        bucket.classification = fruit_state
+                        if k is None:
+                            self.node.get_logger().info("Estimated spring constant: unknown")
+                        else:
+                            self.node.get_logger().info(
+                                f"Estimated spring constant: {k:.5f} N/mm, fruit state: {fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
+                            )
+                    
+                    if width < MIN_BERRY_WIDTH:
+                        min_width_exit_counter += 1
+                        self.node.get_logger().info(f"Width below minimum threshold ({MIN_BERRY_WIDTH} mm) for {min_width_exit_counter} loops.")
                     else:
-                        self.node.get_logger().info(
-                            f"Estimated spring constant: {k:.5f} N/mm, fruit state: {fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
-                        )
+                        min_width_exit_counter = 0
+
 
                 bucket.state = q
 
@@ -515,7 +542,7 @@ class PNS_Driver:
                     or time.time() - start_time > MAX_GRIP_TIME
                     or desired_force == 0
                 )
-            ):
+            ) or (min_width_exit_counter >= MIN_WIDTH_EXIT_LOOPS):
                 self.done = True
             # else:
             #     self.node.get_logger().info(f"\nTime left: {MAX_GRIP_TIME - (time.time() - start_time):.2f}\n")
