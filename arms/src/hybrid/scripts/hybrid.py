@@ -36,7 +36,7 @@ FORCE_SCALE = 1.0
 CONTACT_REQUIRED = 3 
 MAX_ERROR_RATIO = 0.5 # reject updates with error > 50% of force
 THRESHOLD_UNRIPE = 0.06
-THRESHOLD_OVERRIPE = 0.015
+THRESHOLD_OVERRIPE = 0.03
 
 
 class PNS_Driver:
@@ -67,7 +67,7 @@ class PNS_Driver:
         self.thread = threading.Thread(target=self.loop)
         self.thread.start()
 
-        self.data = DataRecorder()
+        self.data = DataRecorder(self.node)
 
     def callback(self, data):
         self.node.get_logger().info(f"I heard {data.data}")
@@ -88,27 +88,32 @@ class PNS_Driver:
             self.last_t = t
             self.last_x = x
             self.last_F = F
-            if self.x0 is None:
-                self.x0 = x
+            
             self.initialized = True
             return None, None, None, None
 
         dt = t - self.last_t
-        if np.isclose(dt, 0, atol=1e-6):
+        if np.isclose(dt, 0, atol=1e-6) or dt < 0:
             return None, None, None, None
 
         # v = (x - self.last_x) / dt
 
         compression = (self.x0 - x) if self.x0 is not None else -x
         # small-contact guard: if measured force is tiny, skip updating to avoid bias
-        F_scaled = F / FORCE_SCALE if FORCE_SCALE != 1.0 else F
+        F_scaled = F / FORCE_SCALE
         CONTACT_THRESHOLD_N = 0.15
         if F_scaled < CONTACT_THRESHOLD_N:
             # not in contact, reset contact counter and skip update
             self.last_t = t
             self.last_x = x
             self.last_F = F
+            # self.x0 = None
+            self.contact_counter = 0
             return None, None, None, None
+        
+        if self.x0 is None:
+            self.x0 = x
+            self.node.get_logger().info(f"Baseline width (x0) set to {self.x0:.2f}")
 
         # in contact, increment contact counter for contact_required consecutive samples, avoiding chatter responses
         self.contact_counter = min(CONTACT_REQUIRED, self.contact_counter + 1)
@@ -135,12 +140,12 @@ class PNS_Driver:
             return None, None, None, None
 
         v_smooth = (
-            (self.compression_ema - self.last_compression_ema) / dt if dt > 0 else 0.0
+            (self.compression_ema - self.last_compression_ema) / dt
         )
         phi = np.array([[self.compression_ema], [v_smooth]])
 
-        F_pred = float(self.theta.T @ phi) # F = k * compression + c * v_smooth
-        error = F_scaled - F_pred
+        F_pred = float((self.theta.T @ phi).item()) # F = k * compression + c * v_smooth
+        error = self.force_ema - F_pred
 
         gain = (self.P @ phi) / (LAMBDA_FACTOR + (phi.T @ self.P @ phi))
         self.theta = self.theta + gain * error
@@ -151,12 +156,13 @@ class PNS_Driver:
         self.last_x = x
         self.last_F = F
 
-        if abs(error) > max(self.MAX_ERROR_RATIO * max(1e-6, F_scaled), 0.1):
+        if abs(error) > max(MAX_ERROR_RATIO * max(1e-6, F_scaled), 0.1):
             self.last_t = t
             self.last_x = x
             self.last_F = F
             self.last_compression_ema = self.compression_ema
             return None, None, F_pred, error
+        
         k, c = self.theta.flatten()
         return k, c, F_pred, error
 
@@ -378,9 +384,9 @@ class PNS_Driver:
                     q = TIGHTEN_FAST
                     contact = False
                 else:
-                    if contact == False:
-                        self.x0 = width
-                        self.node.get_logger().info(f"Baseline width (x0) set to {self.x0:.2f}")
+                    # if contact == False:
+                    #     self.x0 = width
+                    #     self.node.get_logger().info(f"Baseline width (x0) set to {self.x0:.2f}")
                     contact = True
                     # record current width
                     # diameter_approx = state.actual_gripper_width
@@ -405,6 +411,7 @@ class PNS_Driver:
                     bucket.k = k
                     bucket.F_pred = F_pred
                     bucket.rls_error = error
+                    bucket.baseline_w = self.x0 if self.x0 is not None else 0.0
                     bucket.classification = fruit_state
                     if k is None:
                         self.node.get_logger().info("Estimated spring constant: unknown")
@@ -632,7 +639,7 @@ if __name__ == "__main__":
         # (MOVE, None, None),
         # (MOVE, [-0.100, 0.520, 0.400], [-90, -112, 0]),
         # (MOVE, [-0.100, 0.620, 0.400], [-90, -112, 0]),
-        (GRIP, 1),  # berry
+        (GRIP, 0.8),  # berry
         # (GRIP, 3), # ball
         # (MOVE, [-0.100, 0.620, 0.300], [-90, -112, 0]),
         # (GRIP, 1),

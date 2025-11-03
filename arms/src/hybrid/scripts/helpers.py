@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from rclpy.node import Node
 import os
 
 @dataclass
@@ -16,18 +17,20 @@ class DataBucket():
     F_pred: float = 0.0
     k: float = 0.0
     rls_error: float = 0.0
+    baseline_w: float = 0.0
     classification: str = "unknown"  # fruit ripeness
 
     @staticmethod
     def header():
-        return "Time,ReachedHoldTime,Force,DesiredForce,State,ActualWidth,CommandWidth,Proximity,RawFzL,RawFzR,ForcePrediction,SpringConstant,RLSError,Ripeness\n"
+        return "Time,ReachedHoldTime,Force,DesiredForce,State,ActualWidth,CommandWidth,Proximity,RawFzL,RawFzR,ForcePrediction,SpringConstant,RLSError,BaselineWidth,Ripeness\n"
 
     def __str__(self):
-        return f"{self.time},{self.hold_time},{self.force},{self.fd},{self.raw_fz_l},{self.raw_fz_r},{self.state},{self.width},{self.cmd_width},{self.prox},{self.F_pred},{self.k},{self.rls_error},{self.classification}\n"
+        return f"{self.time},{self.hold_time},{self.force},{self.fd},{self.raw_fz_l},{self.raw_fz_r},{self.state},{self.width},{self.cmd_width},{self.prox},{self.F_pred},{self.k},{self.rls_error},{self.baseline_w},{self.classification}\n"
 
 
 @dataclass
 class DataRecorder():
+    node: Node
     data: list[DataBucket] = field(default_factory=list)
 
     def record(self, bucket: DataBucket):

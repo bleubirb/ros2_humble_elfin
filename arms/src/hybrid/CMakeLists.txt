@@ -26,6 +26,7 @@ endif()
 install(
   PROGRAMS
   scripts/hybrid.py
+  scripts/helpers.py
   DESTINATION
   lib/${PROJECT_NAME})
 
