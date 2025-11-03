@@ -24,7 +24,7 @@ ANCHORS = "64,128,256,384,512"
 RATIOS = "0.75,1.0,1.5"
 MIN_SIZE = 1200
 MAX_SIZE = 2000
-SCORE_THRESH = 0.8
+SCORE_THRESH = 0.95
 
 # tile settings
 TILE_ROWS = 2
@@ -248,19 +248,9 @@ class Vision:
                 x0 = max(0, cx - wx)
                 x1 = min(width, cx + wx)
                 y0 = max(0, cy - wy)
-                # y0 = cy - wy
                 y1 = min(height, cy + wy)
-                # reshape x0, x1, y0, y1 to be within image bounds
-                # x0 = max(0, min(x0, width))
-                # x1 = max(0, min(x1, width))
-                # y0 = max(0, min(y0, height))
-                # y1 = max(0, min(y1, height))
                 patch = Zmap[y0:y1, x0:x1]
-                # self.node.get_logger().info(f"slice: {Zmap[y0:y1]}, {Zmap[x0:x1]}, patch shape: {patch.shape}")
 
-                # self.node.get_logger().info(
-                #     f"det {i} tid={tid} cx={cx} cy={cy} x0={x0} x1={x1} y0={y0} y1={y1} patch_size={patch}"
-                # )
                 if patch.size > 0:
                     Zm = float(np.nanmedian(patch))
                     # self.node.get_logger().info(f"Depth patch median Zm={Zm}m for detection {i} (tid={tid})")
@@ -270,10 +260,10 @@ class Vision:
                         cy0 = float(self.principal_point_v)
                         Xcam = ((u - cx0) * Zm) / fx # 0.04 m = 22 inch
                         Ycam = ((v - cy0) * Zm) / fx
-                        
+            
                         depth_method = "stereo"
-                        self.node.get_logger().info(
-                            f"Detection {i} (tid={tid}): X={X:.4f}m, Y={Y:.4f}m, Z={Zm:.4f}m"
+                        self.node.ge0t_logger().info(
+                            f"Detection {i} (tid={tid}): X={Xcam:.4f}m, Y={Ycam:.4f}m, Z={Zm:.4f}m"
                         )
                 else:
                     self.node.get_logger().info(f"Empty depth patch for detection {i} (tid={tid})")
