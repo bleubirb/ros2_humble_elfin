@@ -75,6 +75,8 @@ public:
 
     void set_vel_cb(const std_msgs::msg::Float32::SharedPtr msg);
 
+    ElfinMotionAPI *getMotionAPI();
+
 private:
     moveit::planning_interface::MoveGroupInterfacePtr& group_;
     planning_scene_monitor::PlanningSceneMonitorPtr& planning_scene_monitor_;

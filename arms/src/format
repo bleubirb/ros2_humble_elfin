@@ -1,7 +1,7 @@
 #!/bin/bash
 
 cd "$(dirname "$(readlink -f "$0")")"
-FOLDERS="hybrid vision elfin_robot_ros2/pns_control OnRobot-RG2FT-ROS"
+FOLDERS="hybrid vision elfin_robot_ros2 OnRobot-RG2FT-ROS"
 
 autoflake -v $FOLDERS
 echo "autoflake done"

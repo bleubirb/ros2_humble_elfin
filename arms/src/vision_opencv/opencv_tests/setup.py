@@ -21,7 +21,7 @@ setup(
     keywords=['ROS'],
     classifiers=[
         'Intended Audience :: Developers',
-        'License :: OSI Approved :: Apache Software License',
+        # 'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python',
         'Topic :: Software Development',
     ],
@@ -29,7 +29,7 @@ setup(
         'opencv tests using cv_bridge and ros2 node implementation'
     ),
     license='Apache License, Version 2.0',
-    tests_require=['pytest'],
+    # tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'source = opencv_tests.source:main',

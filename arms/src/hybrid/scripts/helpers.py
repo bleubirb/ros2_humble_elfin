@@ -1,9 +1,11 @@
-from dataclasses import dataclass, field
-from rclpy.node import Node
 import os
+from dataclasses import dataclass, field
+
+from rclpy.node import Node
+
 
 @dataclass
-class DataBucket():
+class DataBucket:
     time: float
     hold_time: float = 0.0
     force: float = 0.0
@@ -29,7 +31,7 @@ class DataBucket():
 
 
 @dataclass
-class DataRecorder():
+class DataRecorder:
     node: Node
     data: list[DataBucket] = field(default_factory=list)
 
@@ -46,5 +48,5 @@ class DataRecorder():
             f.write(DataBucket.header())
             for bucket in self.data:
                 f.write(str(bucket))
-        
+
         self.node.get_logger().info(f"Data saved to data/hybrid_gripper_{f_idx}.csv")

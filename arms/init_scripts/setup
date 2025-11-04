@@ -4,16 +4,16 @@ set -ex
 
 cd "$(dirname "$(readlink -f "$0")")"
 
-if [[ $(/usr/bin/id -u) -ne 0 ]]; then
-    echo "Not running as root"
-    exit 1
+if sudo tmux ls ; then
+    echo "Already running setup scripts in sudo tmux sessions."
+    exit 0
 fi
 
 setup_1_log="setup_1.log"
 setup_1_str="Successful 'activate' of hardware 'GazeboSystem'"
 
-rm -f $setup_1_log
-tmux new -d "./setup_1 $setup_1_log"
+sudo rm -f $setup_1_log
+sudo tmux new -d "./setup_1 $setup_1_log"
 
 while ! grep -q "$setup_1_str" $setup_1_log; do
     echo "Waiting for setup_1 to finish..."
@@ -25,8 +25,8 @@ echo "setup_1 finished successfully."
 setup_2_log="setup_2.log"
 setup_2_str="Ready to take commands for planning group elfin_arm."
 
-rm -f $setup_2_log
-tmux new -d "./setup_2 $setup_2_log"
+sudo rm -f $setup_2_log
+sudo tmux new -d "./setup_2 $setup_2_log"
 
 while ! grep -q "$setup_2_str" $setup_2_log; do
     echo "Waiting for setup_2 to finish..."
@@ -38,8 +38,8 @@ echo "setup_2 finished successfully."
 setup_3_log="setup_3.log"
 setup_3_str="Listening to '/planning_scene'"
 
-rm -f $setup_3_log
-tmux new -d "./setup_3 $setup_3_log"
+sudo rm -f $setup_3_log
+sudo tmux new -d "./setup_3 $setup_3_log"
 
 while ! grep -q "$setup_3_str" $setup_3_log; do
     echo "Waiting for setup_3 to finish..."
@@ -51,8 +51,8 @@ echo "setup_3 finished successfully."
 setup_4_log="setup_4.log"
 setup_4_str="process started with pid"
 
-rm -f $setup_4_log
-tmux new -d "./setup_4 $setup_4_log"
+sudo rm -f $setup_4_log
+sudo tmux new -d "./setup_4 $setup_4_log"
 
 while ! grep -q "$setup_4_str" $setup_4_log; do
     echo "Waiting for setup_4 to finish..."

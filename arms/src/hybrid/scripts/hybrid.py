@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import time
 
 # from geometry_msgs.msg import Wrench, PoseStamped, PoseArray, Pose
 import threading
@@ -12,8 +11,9 @@ from statistics import mean
 import numpy as np
 import rclpy
 import requests
-# from collections import deque
-# from sklearn.cluster import KMeans
+
+# import move_solver as ms
+from helpers import DataBucket, DataRecorder
 
 # from control_msgs.msg import JointTrajectoryControllerState
 from moveit_msgs.srv import GetMotionPlan
@@ -23,8 +23,9 @@ from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
 # from moveit_msgs.msg import JointConstraint, MotionPlanResponse
 from sensor_msgs.msg import JointState
 
-# import move_solver as ms
-from helpers import DataRecorder, DataBucket
+# from collections import deque
+# from sklearn.cluster import KMeans
+
 
 OUTSOURCE_IP = (
     "127.0.0.1"  # should not need with new computer, adds latency for requests
@@ -33,13 +34,14 @@ OUTSOURCE_IP = (
 
 LAMBDA_FACTOR = 0.98
 FORCE_SCALE = 1.0
-CONTACT_REQUIRED = 3 
-MAX_ERROR_RATIO = 0.5 # reject updates with error > 50% of force
+CONTACT_REQUIRED = 3
+MAX_ERROR_RATIO = 0.5  # reject updates with error > 50% of force
 THRESHOLD_UNRIPE = 0.06
 THRESHOLD_OVERRIPE = 0.01
-MIN_BERRY_WIDTH = 50 # mm, min width to consider for berry
-MAX_BERRY_WIDTH = 200 # mm, max width to consider for berry
-MIN_WIDTH_EXIT_LOOPS = 5 # number of loops with width below min to exit force control
+MIN_BERRY_WIDTH = 50  # mm, min width to consider for berry
+MAX_BERRY_WIDTH = 200  # mm, max width to consider for berry
+MIN_WIDTH_EXIT_LOOPS = 5  # number of loops with width below min to exit force control
+
 
 class PNS_Driver:
     def __init__(self, node, ip, port):
@@ -61,7 +63,7 @@ class PNS_Driver:
         self.last_t = None
         self.last_x = None
         self.last_F = None
-        
+
         self.rls_alpha = 0.5
         self.compression_ema = None
         self.force_ema = None
@@ -92,7 +94,7 @@ class PNS_Driver:
             self.last_t = t
             self.last_x = x
             self.last_F = F
-            
+
             self.initialized = True
             # return None, None, None, None
             return None, None, None
@@ -117,12 +119,14 @@ class PNS_Driver:
             self.contact_counter = 0
             # return None, None, None, None
             return None, None, None
-        
+
         if self.x0 is None:
             if x < MIN_BERRY_WIDTH:
-                self.node.get_logger().info("Initial gripper width too small, berry is likely overripe.")
+                self.node.get_logger().info(
+                    "Initial gripper width too small, berry is likely overripe."
+                )
                 return 0, None, None
-            
+
             self.x0 = x
             self.node.get_logger().info(f"Baseline width (x0) set to {self.x0:.2f}")
 
@@ -135,13 +139,16 @@ class PNS_Driver:
             self.last_compression_ema = compression
         else:
             self.compression_ema = (
-                self.rls_alpha * compression + (1 - self.rls_alpha) * self.compression_ema
+                self.rls_alpha * compression
+                + (1 - self.rls_alpha) * self.compression_ema
             )
 
         if self.force_ema is None:
             self.force_ema = F_scaled
         else:
-            self.force_ema = self.rls_alpha * F_scaled + (1 - self.rls_alpha) * self.force_ema
+            self.force_ema = (
+                self.rls_alpha * F_scaled + (1 - self.rls_alpha) * self.force_ema
+            )
 
         if self.contact_counter < CONTACT_REQUIRED:
             # refresh last values to avoid large dt on next iteration
@@ -157,7 +164,9 @@ class PNS_Driver:
         # phi = np.array([[self.compression_ema], [v_smooth]])
         phi = np.array([[self.compression_ema]])
 
-        F_pred = float((self.theta.T @ phi).item()) # F = k * compression + c * v_smooth
+        F_pred = float(
+            (self.theta.T @ phi).item()
+        )  # F = k * compression + c * v_smooth
         error = self.force_ema - F_pred
 
         gain = (self.P @ phi) / (LAMBDA_FACTOR + (phi.T @ self.P @ phi))
@@ -176,7 +185,7 @@ class PNS_Driver:
             self.last_compression_ema = self.compression_ema
             # return None, None, F_pred, error
             return None, F_pred, error
-        
+
         # k, c = self.theta.flatten()
         # return k, c, F_pred, error
         k = self.theta.item()
@@ -191,7 +200,7 @@ class PNS_Driver:
             return "ripe"
         else:
             return "overripe"
-        
+
     def loop(self):
         LOOP_FREQ = 100  # Hz
         PERIOD = 1.0 / LOOP_FREQ
@@ -205,7 +214,7 @@ class PNS_Driver:
         MIN_HOLD_TIME = 10  # hold for 5 minutes -> testing temperature sensor drift
         MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
 
-        OPEN_WIDTH = 400 # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
+        OPEN_WIDTH = 400  # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
         # OPEN_WIDTH = 670  # only for water bottle experiment
 
@@ -334,7 +343,14 @@ class PNS_Driver:
                 delay_start_time = time.time()
 
                 while time.time() - delay_start_time < 5:
-                    tmp_bucket = DataBucket(time=time.time(), fd=desired_force, state=q, width=width, cmd_width=last_target, prox=ProxAvg)
+                    tmp_bucket = DataBucket(
+                        time=time.time(),
+                        fd=desired_force,
+                        state=q,
+                        width=width,
+                        cmd_width=last_target,
+                        prox=ProxAvg,
+                    )
                     self.data.record(tmp_bucket)
 
                     time.sleep(PERIOD)
@@ -370,7 +386,7 @@ class PNS_Driver:
             l_force = l_force_raw - l_force_bias - l_force_drift * loop_counter
             r_force = r_force_raw - r_force_bias - r_force_drift * loop_counter
 
-            force = (l_force_raw + r_force_raw) / 2 /  10
+            force = (l_force_raw + r_force_raw) / 2 / 10
 
             force_range.append(force)
             if len(force_range) > MOVING_AVG_LEN_FORCE:
@@ -426,7 +442,9 @@ class PNS_Driver:
                     # for parameter estimation of spring constant (remove if no estimation)
                     if width < MAX_BERRY_WIDTH:
                         # [k, _, F_pred, error] = self.update_rls(time.time(), width, force_avg)
-                        [k, F_pred, error] = self.update_rls(time.time(), width, force_avg)
+                        [k, F_pred, error] = self.update_rls(
+                            time.time(), width, force_avg
+                        )
                         fruit_state = self.classify(k)
                         bucket.k = k
                         bucket.F_pred = F_pred
@@ -434,18 +452,21 @@ class PNS_Driver:
                         bucket.baseline_w = self.x0 if self.x0 is not None else 0.0
                         bucket.classification = fruit_state
                         if k is None:
-                            self.node.get_logger().info("Estimated spring constant: unknown")
+                            self.node.get_logger().info(
+                                "Estimated spring constant: unknown"
+                            )
                         else:
                             self.node.get_logger().info(
                                 f"Estimated spring constant: {k:.5f} N/mm, fruit state: {fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
                             )
-                    
+
                     if width < MIN_BERRY_WIDTH:
                         min_width_exit_counter += 1
-                        self.node.get_logger().info(f"Width below minimum threshold ({MIN_BERRY_WIDTH} mm) for {min_width_exit_counter} loops.")
+                        self.node.get_logger().info(
+                            f"Width below minimum threshold ({MIN_BERRY_WIDTH} mm) for {min_width_exit_counter} loops."
+                        )
                     else:
                         min_width_exit_counter = 0
-
 
                 bucket.state = q
 
@@ -474,7 +495,9 @@ class PNS_Driver:
                     f"prox: {ProxAvg:.2f}, target width: {tmp_width:.2f}, current force: {force_avg:.2f}, force: {force:.2f}, q state: {q}, raw fz_l: {l_force_raw:.2f}, raw fz_r: {r_force_raw:.2f}"
                 )
 
-            bucket.hold_time = reached_hold_time if reached_hold_time != float("inf") else 0
+            bucket.hold_time = (
+                reached_hold_time if reached_hold_time != float("inf") else 0
+            )
 
             if calibrated:
                 self.data.record(bucket)
@@ -522,7 +545,6 @@ class PNS_Driver:
                     )
                     calibrated = True
                     # set baseline open width for compression calculation
-                    
 
             # if self.enable_drift_comp and self.enable_online_rebaselining:
             #     no_contact = desired_force == 0 and (ProxAvg > FAR or cmd.target_width >= OPEN_WIDTH - OPEN_HOLD_TOLERANCE)

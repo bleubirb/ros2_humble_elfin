@@ -16,6 +16,6 @@ def generate_launch_description():
                 executable="vision.py",
                 name="vision",
                 output="screen",
-            )
+            ),
         ]
     )

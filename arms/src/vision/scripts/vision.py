@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import bisect
 import csv
 import os
-import time
 import threading
-import bisect
+import time
 
 import cv2
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
+from detector import ExactDetector, run_detector_tiled
 from rclpy.node import Node
 from rclpy.publisher import Publisher
-from rclpy.subscription import Subscription
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image, CameraInfo
+from rclpy.subscription import Subscription
+from sensor_msgs.msg import CameraInfo, Image
 from stereo_msgs.msg import DisparityImage
-
-from detector import ExactDetector, run_detector_tiled
 from tracker import CentroidTracker
 
 # ---------------- Config (kept like your original) ----------------
@@ -88,27 +87,27 @@ class Vision:
         self.tracker = CentroidTracker(max_dist_px=TRACK_MAX_DIST)
 
         # --- Robustness & smoothing ---
-        self.Z_PATCH_FRAC = 0.20      # fraction of bbox for Z patch
-        self.MAD_K = 2.5              # median ± K*MAD inlier band
-        self.MIN_INLIERS = 25         # minimal inlier pixels after filtering
-        self.MAD_MAX = 0.004          # m; patch must be this tight (or better)
+        self.Z_PATCH_FRAC = 0.20  # fraction of bbox for Z patch
+        self.MAD_K = 2.5  # median ± K*MAD inlier band
+        self.MIN_INLIERS = 25  # minimal inlier pixels after filtering
+        self.MAD_MAX = 0.004  # m; patch must be this tight (or better)
 
-        self.EMA_ALPHA = 0.80         # per-track EMA (higher=steadier)
+        self.EMA_ALPHA = 0.80  # per-track EMA (higher=steadier)
         self.MAX_DZ_PER_FRAME = 0.08  # m; clamp ΔZ per frame (None to disable)
 
         # anti-drift gates
-        self.Z_ABS_GATE = 0.01        # m: ignore smaller absolute changes
-        self.Z_REL_GATE = 0.03        # fraction: ignore smaller relative changes
-        self.Z_CONFIRM = 2            # need N consecutive frames to accept a bigger change
+        self.Z_ABS_GATE = 0.01  # m: ignore smaller absolute changes
+        self.Z_REL_GATE = 0.03  # fraction: ignore smaller relative changes
+        self.Z_CONFIRM = 2  # need N consecutive frames to accept a bigger change
 
         # stillness gating in image space (px)
-        self.UV_STILL_PX = 0.5        # if center moves less than this, hold Z
+        self.UV_STILL_PX = 0.5  # if center moves less than this, hold Z
 
         # per-track state
-        self._z_ema = {}              # tid -> (z_smooth, last_frame_idx)
-        self._z_last = {}             # tid -> last valid smoothed Z (sticky reuse)
-        self._z_pending = {}          # tid -> {"z": float, "count": int} for confirm
-        self._uv_last = {}            # tid -> (u,v) last center for stillness
+        self._z_ema = {}  # tid -> (z_smooth, last_frame_idx)
+        self._z_last = {}  # tid -> last valid smoothed Z (sticky reuse)
+        self._z_pending = {}  # tid -> {"z": float, "count": int} for confirm
+        self._uv_last = {}  # tid -> (u,v) last center for stillness
 
         # --- CSV output (kept) ---
         if not os.path.exists(DATA_PATH):
@@ -145,7 +144,9 @@ class Vision:
         self.color_times = []  # sorted timestamps for nearest matching
 
         # disparity tuple: (ts, disp_img_32f, f_px, T_m, min_d, roi)
-        self.disparity_data: tuple[float, np.ndarray, float, float, float, object] | None = None
+        self.disparity_data: (
+            tuple[float, np.ndarray, float, float, float, object] | None
+        ) = None
 
         # intrinsics (original rectified frame)
         self.fx = None
@@ -164,7 +165,9 @@ class Vision:
         self._seen_info = False
 
         # processing thread (kept)
-        self.process_frames_thread = threading.Thread(target=self.process_frames_threaded, daemon=True)
+        self.process_frames_thread = threading.Thread(
+            target=self.process_frames_threaded, daemon=True
+        )
         self.process_frames_thread.start()
 
     # ------------------------ Callbacks ------------------------
@@ -190,7 +193,9 @@ class Vision:
         self.node.get_logger().info("Camera info received and subscription closed.")
 
     def store_color_img(self, img_msg: Image) -> None:
-        ts: float = float(img_msg.header.stamp.sec) + float(img_msg.header.stamp.nanosec) * 1e-9
+        ts: float = (
+            float(img_msg.header.stamp.sec) + float(img_msg.header.stamp.nanosec) * 1e-9
+        )
         cv_image = self.br.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
 
         # store + index
@@ -213,7 +218,10 @@ class Vision:
                 self.color_dict.pop(old_ts, None)
 
     def store_disparity_img(self, disp_msg: DisparityImage) -> None:
-        ts: float = float(disp_msg.header.stamp.sec) + float(disp_msg.header.stamp.nanosec) * 1e-9
+        ts: float = (
+            float(disp_msg.header.stamp.sec)
+            + float(disp_msg.header.stamp.nanosec) * 1e-9
+        )
 
         # If our earliest color is newer than this disparity by too much, skip it
         if self.color_times and self.color_times[0] > ts + IMAGE_TS_DELTA_THRESH:
@@ -226,7 +234,9 @@ class Vision:
         elif hasattr(disp_msg, "T"):
             T_m = float(disp_msg.T)
         else:
-            self.node.get_logger().error("DisparityImage has no baseline attribute 't' or 'T'; skipping frame.")
+            self.node.get_logger().error(
+                "DisparityImage has no baseline attribute 't' or 'T'; skipping frame."
+            )
             return
         min_d = float(disp_msg.min_disparity)
         roi = disp_msg.valid_window
@@ -294,8 +304,14 @@ class Vision:
         return Z
 
     def rescaled_intrinsics_for_detector(
-        self, fx_orig: float, cx_orig: float, cy_orig: float,
-        orig_w: int, orig_h: int, det_w: int, det_h: int
+        self,
+        fx_orig: float,
+        cx_orig: float,
+        cy_orig: float,
+        orig_w: int,
+        orig_h: int,
+        det_w: int,
+        det_h: int,
     ):
         sx = det_w / float(orig_w)
         sy = det_h / float(orig_h)
@@ -325,8 +341,10 @@ class Vision:
         """Search outward for the nearest finite Z within a growing radius (pixels)."""
         h, w = Zmap.shape[:2]
         for r in range(3, r_max + 1, 3):
-            x0 = max(0, cx - r); x1 = min(w, cx + r + 1)
-            y0 = max(0, cy - r); y1 = min(h, cy + r + 1)
+            x0 = max(0, cx - r)
+            x1 = min(w, cx + r + 1)
+            y0 = max(0, cy - r)
+            y1 = min(h, cy + r + 1)
             ring = Zmap[y0:y1, x0:x1]
             if ring.size == 0:
                 continue
@@ -358,7 +376,9 @@ class Vision:
 
     def process_frames(self) -> None:
         if not self.disparity_data or not self.color_times:
-            self.node.get_logger().info("Waiting for both color and disparity images...")
+            self.node.get_logger().info(
+                "Waiting for both color and disparity images..."
+            )
             time.sleep(0.05)
             return
 
@@ -399,7 +419,9 @@ class Vision:
         # resize color to working size
         resize_img = cv2.resize(cv_image, (DET_W, DET_H))
         height, width = DET_H, DET_W
-        self.node.get_logger().info(f"disp image shape: {disp_image.shape}, cv_image shape: {resize_img.shape}")
+        self.node.get_logger().info(
+            f"disp image shape: {disp_image.shape}, cv_image shape: {resize_img.shape}"
+        )
 
         # detection (tiled)
         dets_xywh, det_scores, _ = run_detector_tiled(
@@ -427,7 +449,9 @@ class Vision:
             finite = np.isfinite(Z_orig)
             if np.any(finite):
                 p = np.percentile(Z_orig[finite], [5, 50, 95]).astype(float)
-                self.node.get_logger().info(f"Z m p5/50/95: {p[0]:.3f}/{p[1]:.3f}/{p[2]:.3f}")
+                self.node.get_logger().info(
+                    f"Z m p5/50/95: {p[0]:.3f}/{p[1]:.3f}/{p[2]:.3f}"
+                )
             else:
                 self.node.get_logger().info("Depth frame is all-NaN after masking.")
 
@@ -451,8 +475,11 @@ class Vision:
 
         # rescale intrinsics to detector space for XY
         no_intrinsics = (
-            self.fx is None or self.cx is None or self.cy is None or
-            self.orig_w is None or self.orig_h is None
+            self.fx is None
+            or self.cx is None
+            or self.cy is None
+            or self.orig_w is None
+            or self.orig_h is None
         )
         if not no_intrinsics:
             fx_r, cx_r, cy_r = self.rescaled_intrinsics_for_detector(
@@ -477,8 +504,10 @@ class Vision:
             rx0 = ry0 = rx1 = ry1 = None
             if (Zmap is not None) and (roi and (roi.width > 0 and roi.height > 0)):
                 H0, W0 = disp_image.shape[:2]
-                sx = width / float(W0); sy = height / float(H0)
-                rx0 = int(round(roi.x_offset * sx)); ry0 = int(round(roi.y_offset * sy))
+                sx = width / float(W0)
+                sy = height / float(H0)
+                rx0 = int(round(roi.x_offset * sx))
+                ry0 = int(round(roi.y_offset * sy))
                 rx1 = int(round((roi.x_offset + roi.width) * sx))
                 ry1 = int(round((roi.y_offset + roi.height) * sy))
                 inside = (rx0 <= u < rx1) and (ry0 <= v < ry1)
@@ -487,7 +516,9 @@ class Vision:
                 )
 
             if Zmap is not None:
-                self.node.get_logger().info(f"Extracting depth for detection {i} (tid={tid})")
+                self.node.get_logger().info(
+                    f"Extracting depth for detection {i} (tid={tid})"
+                )
 
                 # optionally clamp center into ROI to avoid holes at the edge
                 cxp, cyp = int(round(u)), int(round(v))
@@ -545,7 +576,11 @@ class Vision:
                 self._uv_last[tid] = (u, v)
 
                 # patch quality
-                quality_ok = (ninliers >= self.MIN_INLIERS) and np.isfinite(mad_all) and float(mad_all) <= self.MAD_MAX
+                quality_ok = (
+                    (ninliers >= self.MIN_INLIERS)
+                    and np.isfinite(mad_all)
+                    and float(mad_all) <= self.MAD_MAX
+                )
 
                 # default: no update yet
                 if Zm is not None and np.isfinite(Zm) and Zm > 0 and quality_ok:
@@ -563,7 +598,9 @@ class Vision:
                             else:
                                 # require confirmation across frames
                                 pend = self._z_pending.get(tid, {"z": Zm, "count": 0})
-                                if np.isfinite(pend["z"]) and abs(pend["z"] - Zm) < max(self.Z_ABS_GATE, self.Z_REL_GATE * max(1e-9, Zm)):
+                                if np.isfinite(pend["z"]) and abs(pend["z"] - Zm) < max(
+                                    self.Z_ABS_GATE, self.Z_REL_GATE * max(1e-9, Zm)
+                                ):
                                     pend["count"] += 1
                                 else:
                                     pend = {"z": Zm, "count": 1}

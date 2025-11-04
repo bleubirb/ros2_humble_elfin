@@ -74,8 +74,12 @@ int main(int argc, char** argv)
     planning_scene_monitor->startPublishingPlanningScene(planning_scene_monitor::PlanningSceneMonitor::UPDATE_SCENE,
                                                         "/elfin_basic_api/publish_planning_scene");
     planning_scene_monitor->startSceneMonitor();
-
+    
     elfin_basic_api::ElfinBasicAPI basic_api(base_node,move_group, "elfin_arm_controller/follow_joint_trajectory", planning_scene_monitor);
+
+    RCLCPP_ERROR(base_node->get_logger(),"log node things?");
+    RCLCPP_ERROR(base_node->get_logger(), basic_api.getMotionAPI()->getNode()->get_name());
+
 
     rclcpp::spin(base_node);
     // rclcpp::shutdown();
