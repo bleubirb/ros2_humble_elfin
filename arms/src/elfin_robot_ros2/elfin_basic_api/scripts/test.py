@@ -12,12 +12,19 @@ from geometry_msgs.msg import PoseStamped,PoseArray, Pose
 from ament_package.templates import get_environment_hook_template_path
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 import threading
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 
 class test(object):
     def __init__(self):
         rclpy.init(args=None)
+        qos = QoSProfile(
+            # reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            depth=10
+        )
         self.node = Node('test')
-        self.publisher_joint = self.node.create_publisher(JointState, '/joint_goal', 10)
+        self.publisher_joint = self.node.create_publisher(JointState, '/joint_goal', qos)
+        self.pub_joint_trajectory = self.node.create_publisher(JointTrajectory,'/joint_trajectory',qos)
         self.publisher_cart = self.node.create_publisher(PoseStamped,'/cart_goal', 10)
         self.publisher_cart_goal = self.node.create_publisher(PoseArray,'/cart_path_goal',10)
         self.trajectory_cmd = self.node.create_publisher(JointTrajectory,'/elfin_arm_controller/joint_trajectory',10)
@@ -29,8 +36,8 @@ class test(object):
         robot_state.name = ['elfin_joint1','elfin_joint2','elfin_joint3',
             'elfin_joint4','elfin_joint5','elfin_joint6']
         robot_state.header.stamp = self.node.get_clock().now().to_msg()
-        # robot_state.position = [1.57,1.57,1.57,1.57,1.57,1.57]
-        robot_state.position = [round(math.radians(d), 2) for d in [90, -36, 15, 0, 44, -160]]
+        robot_state.position = [0.0,0.0,0.0,0.0,0.0,0.0]
+        # robot_state.position = [round(math.radians(d), 2) for d in [90, -36, 15, 0, 44, -160]]
         self.publisher_joint.publish(robot_state)
         self.node.get_logger().info('Published joint positions: %s' % robot_state.position)
         rclpy.spin(self.node)
@@ -96,7 +103,6 @@ class test(object):
         self.action_goal.points.append(point_goal)
         self.trajectory_cmd.publish(self.action_goal)
         rclpy.spin(self.node)
-
 
 if __name__ == '__main__':
     pub_test = test()
