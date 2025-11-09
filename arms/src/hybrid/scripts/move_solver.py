@@ -369,22 +369,16 @@ class MoveSolver:
             ):
                 break
 
-        data_dir = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "data"
-        )
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-
         f_idx = 0
-        while os.path.exists(os.path.join(data_dir, f"hybrid_arm_{f_idx}.csv")):
+        while os.path.exists(os.path.join("data", f"hybrid_arm_{f_idx}.csv")):
             f_idx += 1
 
         if retry:
             f = open(
-                os.path.join(data_dir, f"hybrid_arm_{f_idx-1}_retry.csv"), "w"
+                os.path.join("data", f"hybrid_arm_{f_idx-1}_retry.csv"), "w"
             )
         else:
-            f = open(os.path.join(data_dir, f"hybrid_arm_{f_idx}.csv"), "w")
+            f = open(os.path.join("data", f"hybrid_arm_{f_idx}.csv"), "w")
 
         f.write("PositionError,OrientationError\n")
         for i in range(len(position_errors)):
