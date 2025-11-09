@@ -27,6 +27,7 @@ install(
   PROGRAMS
   scripts/hybrid.py
   scripts/helpers.py
+  scripts/move_solver.py
   DESTINATION
   lib/${PROJECT_NAME})
 

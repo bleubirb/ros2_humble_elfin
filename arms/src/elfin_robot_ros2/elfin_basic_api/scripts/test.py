@@ -31,7 +31,34 @@ class test(object):
             JointTrajectory, "/elfin_arm_controller/joint_trajectory", 10
         )
 
+        # send joints to rviz only
+        self.publisher_joint_rviz = self.node.create_publisher(
+            JointState, "/rviz/joint_goal", 10
+        )
+
         # self.publisher_stop = self.node.create_publisher()
+
+    def function_rviz_joints(self):
+        while True:
+            robot_state = JointState()
+            robot_state.name = [
+                "elfin_joint1",
+                "elfin_joint2",
+                "elfin_joint3",
+                "elfin_joint4",
+                "elfin_joint5",
+                "elfin_joint6",
+            ]
+            robot_state.header.stamp = self.node.get_clock().now().to_msg()
+            robot_state.position = [0.0, 0.0, 0.0, 0.0, 0.0, 1.75]
+            # robot_state.position = [round(math.radians(d), 2) for d in [90, -36, 15, 0, 44, -160]]
+            self.publisher_joint_rviz.publish(robot_state)
+            self.node.get_logger().info(
+                "Published RViz joint positions: %s" % robot_state.position
+            )
+
+            time.sleep(5)
+        rclpy.spin(self.node)
 
     def function_pub_joints(self):
         while True:
@@ -45,7 +72,7 @@ class test(object):
                 "elfin_joint6",
             ]
             robot_state.header.stamp = self.node.get_clock().now().to_msg()
-            robot_state.position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            robot_state.position = [-1.75, 0.0, 0.0, 0.0, 0.0, 1.75]
             # robot_state.position = [round(math.radians(d), 2) for d in [90, -36, 15, 0, 44, -160]]
             self.publisher_joint.publish(robot_state)
             self.node.get_logger().info(
