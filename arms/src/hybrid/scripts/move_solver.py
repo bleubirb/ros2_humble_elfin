@@ -10,7 +10,7 @@ import numpy as np
 import sympy as sp
 from scipy.spatial.transform import Rotation
 
-DISABLE_LOGGING = True
+DISABLE_LOGGING = False
 
 class bcolors:
     HEADER = "\033[95m"

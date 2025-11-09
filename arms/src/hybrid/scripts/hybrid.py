@@ -18,7 +18,7 @@ from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
 
 from sensor_msgs.msg import JointState
 
-DISABLE_PNS_LOGGING = True
+DISABLE_PNS_LOGGING = False
 DISABLE_MOVE_LOGGING = False
 
 LAMBDA_FACTOR = 0.98
