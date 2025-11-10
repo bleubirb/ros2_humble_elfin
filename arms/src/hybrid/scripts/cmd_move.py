@@ -28,10 +28,6 @@ class CmdMove(object):
         self.joints_pub = node.create_publisher(JointState, "joint_goal", 1)
         self.pose_pub = node.create_publisher(Pose, "hybrid/robot_pose", 1)
 
-        self.camera_pose_sub = node.create_subscription(
-            Pose, "/vision/detected_poses", self.camera_pose_callback, 10
-        )
-
         self.joint_state = None
         self.joint_orders = None
 
@@ -68,11 +64,6 @@ class CmdMove(object):
         self.pose_pub.publish(pose_msg)
 
         # self.log(f"Received joint state: {self.joint_state}")
-
-    def camera_pose_callback(self, data):
-        self.log(
-            f"Received camera pose: pos=({data.position.x}, {data.position.y}, {data.position.z}), ori=({data.orientation.x}, {data.orientation.y}, {data.orientation.z}, {data.orientation.w})"
-        )
 
     def dance(self, joints):
         self.log(f"Attempted joint state: {joints}")

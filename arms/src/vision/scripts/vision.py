@@ -10,13 +10,11 @@ import cv2
 import rclpy
 from cv_bridge import CvBridge
 from detector import ExactDetector, run_detector_tiled
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Point, Pose
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 from sensor_msgs.msg import Image
-
-# from stereo_msgs.msg import Image
 from tracker import CentroidTracker
 
 from vision_msgs.msg import Berries, BerryPose
@@ -272,7 +270,9 @@ class Vision:
 
             if coords["x"] != float("nan"):
                 berries.append(
-                    BerryPose(id=tid, pose=[coords["x"], coords["y"], coords["z"]])
+                    BerryPose(
+                        id=tid, pose=Point(x=coords["x"], y=coords["y"], z=coords["z"])
+                    )
                 )
 
             self.annotate_image(cv_image, x, y, w, h, tid, NAME, score, coords)

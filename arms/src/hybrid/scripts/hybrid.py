@@ -7,20 +7,29 @@ import time
 from asyncio import Future
 
 import rclpy
+from cmd_move import CmdMove
 from move_solver import (
     Action,
     JointAction,
     MoveSolver,
 )
-from cmd_move import CmdMove
 from pns_driver import PNS_Driver
+
+from vision_msgs.msg import Berries
+from vision_msgs.srv import Ready
+
+OBSERVE_LOC = [0.053, 0.500, 0.4546]  # in m
+DROP_LOC = [-0.300, 0.00, 0.200]
+
+# gripper is rotated 22 deg wrt horizontal when picking berries
+BERRY_ROT = [-90, 68, 0]  # in degrees
+DROP_ROT = [-179.5, 0, 0]
+
 
 def pick_seq(position: list[float]) -> list[JointAction]:
     actions = []
     offset = 0.1  # meters
 
-    # orientation = [-90, -112, 0]
-    orientation = [-90, 68, 0]
     force = 0.8  # for berry
     # force = 3.0 # for ball
 
@@ -29,29 +38,29 @@ def pick_seq(position: list[float]) -> list[JointAction]:
         JointAction(
             Action.MOVE,
             position=[position[0], position[1] - offset, position[2]],
-            orientation=orientation,
+            orientation=BERRY_ROT,
         )
     )
-    # actions.append(JointAction(Action.MOVE, position=position, orientation=orientation))
+    actions.append(JointAction(Action.MOVE, position=position, orientation=BERRY_ROT))
 
     # grip
-    # actions.append(JointAction(Action.GRIP, force=force))
+    actions.append(JointAction(Action.GRIP, force=force))
 
     # pull down (-z) and back (-y)
-    # actions.append(
-    #     JointAction(
-    #         Action.MOVE,
-    #         position=[position[0], position[1], position[2] - offset],
-    #         orientation=orientation,
-    #     )
-    # )
-    # actions.append(
-    #     JointAction(
-    #         Action.MOVE,
-    #         position=[position[0], position[1] - offset, position[2] - offset],
-    #         orientation=orientation,
-    #     )
-    # )
+    actions.append(
+        JointAction(
+            Action.MOVE,
+            position=[position[0], position[1], position[2] - offset],
+            orientation=BERRY_ROT,
+        )
+    )
+    actions.append(
+        JointAction(
+            Action.MOVE,
+            position=[position[0], position[1] - offset, position[2] - offset],
+            orientation=BERRY_ROT,
+        )
+    )
 
     return actions
 
@@ -60,24 +69,58 @@ def drop_seq(position: list[float]) -> list[JointAction]:
     actions = []
 
     raised_pos = [position[0], position[1], position[2] + 0.15]
-    orientation = [-179.5, 0, 0]
     force = 0.0  # release
 
     # approach from raised pos
-    actions.append(
-        JointAction(Action.MOVE, position=raised_pos, orientation=orientation)
-    )
-    actions.append(JointAction(Action.MOVE, position=position, orientation=orientation))
+    actions.append(JointAction(Action.MOVE, position=raised_pos, orientation=DROP_ROT))
+    actions.append(JointAction(Action.MOVE, position=position, orientation=DROP_ROT))
 
     # drop
-    # actions.append(JointAction(Action.GRIP, force=force))
+    actions.append(JointAction(Action.GRIP, force=force))
 
     # return to raised pos
-    actions.append(
-        JointAction(Action.MOVE, position=raised_pos, orientation=orientation)
-    )
+    actions.append(JointAction(Action.MOVE, position=raised_pos, orientation=DROP_ROT))
 
     return actions
+
+
+def handle_action(action: JointAction, ms: MoveSolver, cm: CmdMove):
+    log_str = ""
+    if action.action == Action.MOVE:  # MOVE action
+        node.get_logger().info(
+            f"Moving to {action.position} with orientation {action.orientation}"
+        )
+
+        # log the move action, either as all zeros or with the specified position and orientation
+        if action.position is None:
+            log_str = f"{time.time()},{Action.MOVE},{','.join(['0']*6)},0\n"
+        else:
+            log_str = f"{time.time()},{Action.MOVE},{','.join([str(x) for x in action.position])},{','.join([str(x) for x in action.orientation])},0\n"
+
+        joints = ms.move(
+            action.position,
+            action.orientation,
+            cm.joint_state or [0, 0, 0, 0, 0, 0],
+        )
+
+        # execute the joint action
+        cm.dance(joints)
+    else:  # GRIP action
+        node.get_logger().info(f"Setting desired force to {action.force} for {i+1}")
+        log_str = f"{time.time()},{Action.GRIP},{','.join(['0']*6)},{action.force}\n"
+
+        driver.set_fd(action.force)
+
+        count = 0
+        while not driver.get_done():
+            if count % 10 == 0:
+                node.get_logger().info(
+                    f"Waiting for gripper to reach desired force for {i+1}"
+                )
+            count += 1
+            time.sleep(0.5)
+
+    return log_str
 
 
 if __name__ == "__main__":
@@ -99,47 +142,16 @@ if __name__ == "__main__":
 
     time.sleep(1)
 
-    berry_loc = [0.053, 0.720, 0.4546]  # in mm
-    drop_loc = [-0.300, 0.00, 0.200]
-
     HOME = JointAction(Action.MOVE, position=None, orientation=None)
 
     actions: list[JointAction] = [
         JointAction(Action.GRIP, force=0),
-        # HOME,
-        *pick_seq(berry_loc),
+        HOME,
+        JointAction(Action.MOVE, position=OBSERVE_LOC, orientation=[-90, 68, 0]),
+        # *pick_seq(berry_loc),
         # *drop_seq(drop_loc),
         # HOME,
     ]
-
-    joint_actions = dict()
-
-    def compute_thread():
-        last_idx = -1
-        for i, action in enumerate(actions):
-            if action.action == Action.MOVE:
-                node.get_logger().info(f"Requesting joints for {i}")
-
-                if last_idx == -1:
-                    while cm.joint_state is None:
-                        node.get_logger().info(
-                            "Waiting for initial joint state to be received..."
-                        )
-                        time.sleep(0.5)
-                    start_state = cm.joint_state
-                else:
-                    start_state = joint_actions[last_idx]
-
-                joint_actions[i] = ms.move(
-                    action.position,
-                    action.orientation,
-                    start_state,
-                )
-                node.get_logger().info(f"Received joints for {i}")
-                last_idx = i
-
-    thread = threading.Thread(target=compute_thread)
-    thread.start()
 
     if not os.path.exists("data"):
         os.makedirs("data")
@@ -151,56 +163,59 @@ if __name__ == "__main__":
 
     for i, action in enumerate(actions):
         node.get_logger().info(f"Executing action {i+1}/{len(actions)}")
-        if action.action == Action.MOVE:  # MOVE action
-            node.get_logger().info(
-                f"Moving to {i+1}: {action.position} with orientation {action.orientation}"
-            )
 
-            # log the move action, either as all zeros or with the specified position and orientation
-            if action.position is None:
-                log_file.write(f"{time.time()},{Action.MOVE},{','.join(['0']*6)},0\n")
-            else:
-                log_file.write(
-                    f"{time.time()},{Action.MOVE},{','.join([str(x) for x in action.position])},{','.join([str(x) for x in action.orientation])},0\n"
-                )
-
-            # wait for the joint action to be computed
-            while i not in joint_actions:
-                if count % 10 == 0:
-                    node.get_logger().info(f"Waiting for joint action for {i+1}")
-                count += 1
-                time.sleep(0.1)
-
-            # execute the joint action
-            cm.dance(joint_actions[i])
-        else:  # GRIP action
-            node.get_logger().info(f"Setting desired force to {action.force} for {i+1}")
-            log_file.write(
-                f"{time.time()},{Action.GRIP},{','.join(['0']*6)},{action.force}\n"
-            )
-
-            driver.set_fd(action.force)
-
-            count = 0
-            while not driver.get_done():
-                if count % 10 == 0:
-                    node.get_logger().info(
-                        f"Waiting for gripper to reach desired force for {i+1}"
-                    )
-                count += 1
-                time.sleep(0.5)
+        log_file.write(handle_action(action, ms, cm))
 
         node.get_logger().info(f"Finished action {i+1}/{len(actions)}")
+
+    node.create_client(Ready, "/vision/set_ready").call_async(
+        Ready.Request(ready_req=True)
+    )
+
+    def save_poses(msg: Berries):
+        node.poses = msg.berries
+
+    poses_sub = node.create_subscription(
+        Berries,
+        "/vision/detected_poses",
+        save_poses,
+        1,
+    )
+
+    count = 0
+    while not hasattr(node, "poses"):
+        if count % 10 == 0:
+            node.get_logger().info("Waiting for berry poses...")
+        count += 1
+        time.sleep(0.5)
+
+    for j, berry in enumerate(node.poses):
+        berry_loc = [
+            berry.pose.x,
+            berry.pose.y,
+            berry.pose.z,
+        ]
+        node.get_logger().info(f"Berry {j+1}: {berry_loc}")
+
+        pick_actions = pick_seq(berry_loc)
+        drop_actions = drop_seq(DROP_LOC)
+
+        for k, action in enumerate(pick_actions + drop_actions):
+            node.get_logger().info(f"Executing action {k+1}/{len(actions)}")
+
+            log_file.write(handle_action(action, ms, cm))
+
+            node.get_logger().info(f"Finished action {k+1}/{len(actions)}")
 
     log_file.close()
     node.get_logger().info(f"Data saved to data/hybrid_state_{f_idx}.csv")
     driver.stop()
     node.get_logger().info("It worked!")
 
-    while True:
-        time.sleep(1)
+    # while True:
+    #     time.sleep(1)
 
     # cleanup
-    # future.set_result(True)
-    # spin_thread.join()
-    # rclpy.shutdown()
+    future.set_result(True)
+    spin_thread.join()
+    rclpy.shutdown()
