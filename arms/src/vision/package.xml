@@ -13,6 +13,7 @@
   <depend>cv_bridge</depend>
   <depend>sensor_msgs</depend>
   <depend>image_transport</depend>
+  <depend>vision_msgs</depend>
   <!-- <depend>torch</depend>
   <depend>torchvision</depend> -->
 

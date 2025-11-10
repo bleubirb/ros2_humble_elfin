@@ -11,6 +11,7 @@ find_package(rclpy REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(image_transport REQUIRED)
+find_package(vision_msgs REQUIRED)
 # find_package(torch REQUIRED)
 # find_package(torchvision REQUIRED)
 

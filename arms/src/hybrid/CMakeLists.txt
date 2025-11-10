@@ -7,6 +7,7 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(vision_msgs REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
@@ -28,6 +29,8 @@ install(
   scripts/hybrid.py
   scripts/helpers.py
   scripts/move_solver.py
+  scripts/cmd_move.py
+  scripts/pns_driver.py
   DESTINATION
   lib/${PROJECT_NAME})
 
