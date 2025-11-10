@@ -12,6 +12,7 @@ from scipy.spatial.transform import Rotation
 
 DISABLE_LOGGING = False
 
+
 class bcolors:
     HEADER = "\033[95m"
     OKBLUE = "\033[94m"
@@ -169,6 +170,39 @@ class MoveSolver:
 
         # Combine Jacobian components
         self.J = sp.Matrix.vstack(self.Jv, self.Jw)
+
+    def pose_from_joints(self, joints):
+        joints = np.array(joints, dtype=float)
+        position = np.array(
+            self.p.subs(
+                [
+                    (self.theta1, joints[0]),
+                    (self.theta2, joints[1]),
+                    (self.theta3, joints[2]),
+                    (self.theta4, joints[3]),
+                    (self.theta5, joints[4]),
+                    (self.theta6, joints[5]),
+                ]
+            ),
+            dtype=float,
+        )
+        position = np.round(position, 4).flatten()
+        rotation_matrix = np.array(
+            self.R.subs(
+                [
+                    (self.theta1, joints[0]),
+                    (self.theta2, joints[1]),
+                    (self.theta3, joints[2]),
+                    (self.theta4, joints[3]),
+                    (self.theta5, joints[4]),
+                    (self.theta6, joints[5]),
+                ]
+            ),
+            dtype=float,
+        )
+        orientation = Rotation.from_matrix(rotation_matrix).as_quat()
+        orientation = np.round(orientation, 4)
+        return position.tolist(), orientation.tolist()
 
     def check_pose(self, drag_joints, target_pose, target_orientation, retry=False):
         self.log(f"Checking pose: {drag_joints}")
@@ -374,9 +408,7 @@ class MoveSolver:
             f_idx += 1
 
         if retry:
-            f = open(
-                os.path.join("data", f"hybrid_arm_{f_idx-1}_retry.csv"), "w"
-            )
+            f = open(os.path.join("data", f"hybrid_arm_{f_idx-1}_retry.csv"), "w")
         else:
             f = open(os.path.join("data", f"hybrid_arm_{f_idx}.csv"), "w")
 

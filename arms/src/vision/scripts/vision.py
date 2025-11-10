@@ -9,14 +9,19 @@ import time
 import cv2
 import numpy as np
 import rclpy
+import requests
 from cv_bridge import CvBridge
 from detector import ExactDetector, run_detector_tiled
+from geometry_msgs.msg import Pose
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 from sensor_msgs.msg import CameraInfo, Image
+
 # from stereo_msgs.msg import Image
 from tracker import CentroidTracker
+import subprocess
+import json
 
 CHECKPOINT = os.path.join(os.path.abspath(os.path.dirname(__file__)), "bestestboy.pth")
 NAME = "blueberry"
@@ -52,17 +57,27 @@ class Vision:
         self.processed_pub: Publisher = node.create_publisher(
             Image, "/vision/processed_image", 1
         )
+
+        self.poses_pub: Publisher = node.create_publisher(
+            Pose, "/vision/detected_poses", 1
+        )
+
         self.img_sub: Subscription = node.create_subscription(
             Image, "/stereo/left/image_rect_color", self.store_color_img, 1
         )
 
-        self.depth_sub: Subscription = node.create_subscription(
-            Image, "/stereo/depth", self.store_depth_img, 1
-        )
+        # self.depth_sub: Subscription = node.create_subscription(
+        #     Image, "/stereo/depth", self.store_depth_img, 1
+        # )
 
-        self.info_sub: Subscription = node.create_subscription(
-            CameraInfo, "/stereo/left/camera_info", self.store_camera_info, 1
+        # self.info_sub: Subscription = node.create_subscription(
+        #     CameraInfo, "/stereo/left/camera_info", self.store_camera_info, 1
+        # )
+
+        self.pose_sub: Subscription = node.create_subscription(
+            Pose, "/hybrid/robot_pose", self.store_robot_pose, 1
         )
+        self.robot_pose: Pose | None = None
 
         self.br: CvBridge = CvBridge()
 
@@ -101,32 +116,17 @@ class Vision:
                 "X_m",
                 "Y_m",
                 "Z_m",
-                "depth_method",
             ]
         )
 
         self.last_tick: float = 0.0
 
         self.color_dict: dict[float, np.ndarray] = {}
-        self.depth_data: (
-            tuple[float, np.ndarray, float, float, float, float, float] | None
-        ) = None
 
         self.process_frames_thread = threading.Thread(
             target=self.process_frames_threaded
         )
         self.process_frames_thread.start()
-
-    def store_camera_info(self, info_msg: CameraInfo) -> None:
-        self.node.destroy_subscription(self.info_sub)
-        self.node.get_logger().info("Camera info received and subscription closed.")
-
-        self.principal_point_u = info_msg.k[2]
-        self.principal_point_v = info_msg.k[5]
-
-        self.node.get_logger().info(
-            f"Camera principal point: u={self.principal_point_u}, v={self.principal_point_v}"
-        )
 
     def store_color_img(self, img_msg: Image) -> None:
         ts: float = (
@@ -139,216 +139,159 @@ class Vision:
 
         # self.node.get_logger().info(f"Stored color image at timestamp {ts:.3f}s")
 
-    def store_depth_img(self, depth_msg: Image) -> None:
-        ts: float = (
-            float(depth_msg.header.stamp.sec)
-            + float(depth_msg.header.stamp.nanosec) * 1e-9
-        )
-        if (
-            min(self.color_dict.keys(), default=float("inf"))
-            > ts + IMAGE_TS_DELTA_THRESH
-        ):
-            self.node.get_logger().warning(
-                f"Depth image at {ts:.3f}s is too old compared to color images; ignoring."
-            )
-            return
-        
-        # convert ros image message to opencv image
-        depth_image = self.br.imgmsg_to_cv2(depth_msg, desired_encoding="32FC1")
-
-        self.depth_data = (
-            ts,
-            depth_image.copy(),
-            self.principal_point_u,
-            self.principal_point_v,
-            self.focal_length_px,
-            self.baseline_m,
-            self.depth_data,
-        )
-
-    # def store_disparity_img(self, disp_msg: DisparityImage) -> None:
-    #     ts: float = (
-    #         float(disp_msg.header.stamp.sec)
-    #         + float(disp_msg.header.stamp.nanosec) * 1e-9
-    #     )
-
-    #     if (
-    #         min(self.color_dict.keys(), default=float("inf"))
-    #         > ts + IMAGE_TS_DELTA_THRESH
-    #     ):
-    #         self.node.get_logger().warning(
-    #             f"Disparity image at {ts:.3f}s is too old compared to color images; ignoring."
-    #         )
-    #         return
-
-        # Convert ROS Image message to OpenCV image
-        # disp_image = self.br.imgmsg_to_cv2(
-        #     disp_msg.image, desired_encoding="32FC1"
-        # )  # TODO: mono16?
-
-        # self.disparity_data = (
-        #     ts,
-        #     disp_image.copy(),
-        #     disp_msg.delta_d,
-        #     disp_msg.valid_window.x_offset,  # always 0
-        #     disp_msg.f,
-        #     disp_msg.t,
-        #     disp_msg.min_disparity,
-        # )
-
-        # self.node.get_logger().info(f"Stored disparity image at timestamp {ts:.3f}s")
-
-        for ts_color in list(self.color_dict.keys()):
-            if ts_color < ts - IMAGE_TS_DELTA_THRESH:
-                # self.node.get_logger().warning(
-                #     f"Color image at {ts_color:.3f}s is too old compared to disparity images; removing."
-                # )
-                del self.color_dict[ts_color]
+    def store_robot_pose(self, pose_msg: Pose) -> None:
+        self.robot_pose = pose_msg
+        # self.node.get_logger().info(f"Updated robot pose: {pose_msg}")
 
     def process_frames(self) -> None:
-        if not self.depth_data or not self.color_dict:
-            self.node.get_logger().info(
-                "Waiting for both color and depth images..."
-            )
+        if not self.color_dict:
+            self.node.get_logger().info("Waiting for color image...")
             time.sleep(0.1)
             return
 
-        # find current depth timestamp
-        depth_ts, depth_image, principal_point_u, principal_point_v, focal_length_px, baseline_m, invalid_value = (
-            self.depth_data
-        )
+        processed = False # set processed to true when all berries in a frame have been localized
 
-        if depth_ts == self.last_tick:
-            # no new depth image
-            time.sleep(0.01)
-            return
+        while not processed and rclpy.ok():
+            # find newest color timestamp
+            color_ts = max(self.color_dict.keys())
 
-        # find closest color timestamp
-        color_ts = min(self.color_dict.keys(), key=lambda t: abs(t - depth_ts))
+            # pop images and parameters from dicts
+            cv_image = self.color_dict.pop(color_ts)
 
-        # check timestamp difference
-        if abs(color_ts - depth_ts) > 0.05:
-            self.node.get_logger().error(
-                f"Timestamp mismatch: color {color_ts:.3f}s vs depth {depth_ts:.3f}s"
+            # detection (tiled)
+            dets_xywh, det_scores, _ = run_detector_tiled(
+                self.detector,
+                cv_image,
+                SCORE_THRESH,
+                TILE_ROWS,
+                TILE_COLS,
+                TILE_OVERLAP,
+                nms_thresh=TILE_NMS,
             )
-            time.sleep(0.1)
-            return
-        # else:
-        #     self.node.get_logger().info(
-        #         f"Processing synchronized frames at {disp_ts:.3f}s"
-        #     )
+            ids = self.tracker.update(dets_xywh) if dets_xywh else []
 
-        # pop images and parameters from dicts
-        cv_image = self.color_dict.pop(color_ts)
+            for i, xywh in enumerate(dets_xywh):
+                self.node.get_logger().info(f"Detection {i}: xywh={xywh}, score={det_scores[i]:.4f}")
+                x, y, w, h = map(int, xywh)
+                u, v = x + 0.5 * w, y + 0.5 * h
+                tid = ids[i] if i < len(ids) else -1
+                score = det_scores[i]
+                coords = {"x": float("nan"), "y": float("nan"), "z": float("nan")}
 
-        resize_img = cv2.resize(cv_image, (640, 480))
+                if self.robot_pose is not None:
+                    try:
+                        payload_args = {
+                            "pose_frame": "external",
+                            "region_of_interest_2d": {
+                                "offset_x": int(x),
+                                "offset_y": int(y),
+                                "width": int(w),
+                                "height": int(h),
+                            },
+                            "cell_count": {"x": 1, "y": 1},
+                            "robot_pose": {
+                                "position": {
+                                    "x": float(self.robot_pose.position.x),
+                                    "y": float(self.robot_pose.position.y),
+                                    "z": float(self.robot_pose.position.z),
+                                },
+                                "orientation": {
+                                    "x": float(self.robot_pose.orientation.x),
+                                    "y": float(self.robot_pose.orientation.y),
+                                    "z": float(self.robot_pose.orientation.z),
+                                    "w": float(self.robot_pose.orientation.w),
+                                },
+                            },
+                        }
+                        payload = {"args": payload_args}
+                        payload_json = json.dumps(payload)
+                        url = "http://192.168.1.104/api/v2/pipelines/0/nodes/rc_measure/services/measure_depth"
 
-        # height, width, _ = cv_image.shape
-        height = 480
-        width = 640
-        self.node.get_logger().info(
-            f"depth image shape: {depth_image.shape}, cv_image shape: {resize_img.shape}"
-        )
+                        # self.node.get_logger().info(f"Depth request payload: {payload}")
 
-        # detection (tiled)
-        dets_xywh, det_scores, _ = run_detector_tiled(
-            self.detector,
-            resize_img,
-            SCORE_THRESH,
-            TILE_ROWS,
-            TILE_COLS,
-            TILE_OVERLAP,
-            nms_thresh=TILE_NMS,
-        )
-        ids = self.tracker.update(dets_xywh) if dets_xywh else []
-
-        Zmap = None
-        # if not NO_DEPTH:
-        #     self.node.get_logger().info("Computing depth map from disparity...")
-        #     Zmap = self.disparity_to_depth_m(
-        #         disp_image,
-        #         scale,
-        #         offset,
-        #         focal_px,
-        #         baseline_m,
-        #         invalid_value,
-        #     )
-        #     self.node.get_logger().info(f"zmap: {Zmap.shape}")
-
-        for i, xywh in enumerate(dets_xywh):
-            x, y, w, h = map(int, xywh)
-            u, v = x + 0.5 * w, y + 0.5 * h
-            tid = ids[i] if i < len(ids) else -1
-            score = det_scores[i]
-
-            # TODO: depth estimation
-            # use depth image (in meters) instead of a precomputed Zmap/disparity
-            X = Y = Zm = None
-            depth_method = ""
-            # ensure depth_ts is available under the name used elsewhere
-            disp_ts = depth_ts
-
-            if depth_image is not None:
-                self.node.get_logger().info(
-                    f"Extracting depth from depth image for detection {i} (tid={tid})"
-                )
-
-                # depth image may have a different resolution than the resized color image
-                depth_h, depth_w = depth_image.shape[:2]
-                scale_x = float(depth_w) / float(width)
-                scale_y = float(depth_h) / float(height)
-
-                # map detection center and patch size into depth image coordinates
-                cx_d = int(round(u * scale_x))
-                cy_d = int(round(v * scale_y))
-                wx_d = max(1, int(round(w * 0.2 * scale_x)))
-                wy_d = max(1, int(round(h * 0.2 * scale_y)))
-
-                x0 = max(0, cx_d - wx_d)
-                x1 = min(depth_w, cx_d + wx_d)
-                y0 = max(0, cy_d - wy_d)
-                y1 = min(depth_h, cy_d + wy_d)
-
-                patch = depth_image[y0:y1, x0:x1]
-
-                if patch.size > 0:
-                    # consider only valid positive finite depth values
-                    valid_mask = np.isfinite(patch) & (patch > 0)
-                    if np.any(valid_mask):
-                        Zm = float(np.median(patch[valid_mask]))
-                    else:
-                        # fallback to median including NaNs will yield nan; treat as invalid
-                        Zm = float(np.nanmedian(patch))
-
-                    if np.isfinite(Zm) and Zm > 0:
-                        # focal length and principal point must be in depth-image pixel units
-                        fx = float(focal_length_px)
-                        # scale principal point to depth image coords
-                        cx0_depth = float(principal_point_u) * scale_x
-                        cy0_depth = float(principal_point_v) * scale_y
-
-                        # compute camera-space X, Y (meters)
-                        X = ((cx_d - cx0_depth) * Zm) / fx
-                        Y = ((cy_d - cy0_depth) * Zm) / fx
-
-                        depth_method = "depth_image"
-                        self.node.get_logger().info(
-                            f"Detection {i} (tid={tid}): X={X:.4f}m, Y={Y:.4f}m, Z={Zm:.4f}m"
+                        cmd = [
+                            "curl",
+                            "-s",
+                            "-X",
+                            "PUT",
+                            url,
+                            "-H",
+                            "Content-Type: application/json",
+                            "-d",
+                            payload_json,
+                            "-w",
+                            "\n%{http_code}",
+                        ]
+                        proc = subprocess.run(
+                            cmd, capture_output=True, text=True, timeout=5.0
                         )
-                    else:
-                        self.node.get_logger().info(
-                            f"No valid depth values in patch for detection {i} (tid={tid})"
-                        )
-                else:
-                    self.node.get_logger().info(
-                        f"Empty depth patch for detection {i} (tid={tid})"
-                    )
 
-            self.annotate_image(resize_img, x, y, w, h, tid, NAME, score, Zm)
+                        if proc.stderr:
+                            self.node.get_logger().debug(
+                                f"curl stderr: {proc.stderr.strip()}"
+                            )
+
+                        stdout = proc.stdout or ""
+                        body, sep, status = stdout.rpartition("\n")
+                        if not sep:  
+                            body = stdout
+                            status_code = None
+                        else:
+                            status_code = int(status) if status.isdigit() else None
+
+                        class _Resp:
+                            def __init__(self, status_code, text):
+                                self.status_code = status_code
+                                self.text = text
+
+                            def json(self):
+                                return json.loads(self.text)
+
+                        resp = _Resp(status_code, body)
+                    except subprocess.TimeoutExpired as exc:
+                        self.node.get_logger().error(f"Depth request timed out: {exc}")
+                        resp = None
+                    except Exception as exc:
+                        self.node.get_logger().error(f"Depth request failed: {exc}")
+                        resp = None
+                    if resp is not None:
+                        try:
+                            self.node.get_logger().info(f"Depth response status: {resp.status_code}")
+                            # self.node.get_logger().info(f"Depth response body: {resp.text}")
+                            depth_info = resp.json()
+                        except ValueError:
+                            self.node.get_logger().error("Depth response not JSON")
+                            depth_info = None
+
+                        # parse depth_info and set coords
+                        if depth_info is not None:
+                            resp_body = depth_info.get("response", depth_info)
+
+                            overall = resp_body.get("overall", {}) or {}
+                            mean_overall = overall.get("mean_z") or {}
+
+                            # self.node.get_logger().info(f"Mean overall depth: {mean_overall}")
+
+                            mz_x = float(mean_overall.get("x"))
+                            mz_y = float(mean_overall.get("y"))
+                            mz_z = float(mean_overall.get("z"))
+
+                            coords["x"] = mz_x
+                            coords["y"] = mz_z # robot coords
+                            coords["z"] = mz_y
+
+                            self.node.get_logger().info(
+                                f"Detection {i} (ID {tid}): 3D coords: X={coords['x']:.4f} Y={coords['y']:.4f} Z={coords['z']:.4f}"
+                            )
+                        else:
+                            self.node.get_logger().error("No depth data received")
+            processed = True
+
+            self.annotate_image(cv_image, x, y, w, h, tid, NAME, score, coords)
             self.csv_writer.writerow(
                 [
                     self.frame,
-                    f"{disp_ts:.6f}",
+                    f"{color_ts:.6f}",
                     tid,
                     NAME,
                     f"{score:.4f}",
@@ -358,15 +301,14 @@ class Vision:
                     y,
                     x + w,
                     y + h,
-                    "None" if X is None else f"{X:.4f}",
-                    "None" if Y is None else f"{Y:.4f}",
-                    "None" if Zm is None else f"{Zm:.4f}",
-                    depth_method,
+                    f"{coords['x']:.4f}",
+                    f"{coords['y']:.4f}",
+                    f"{coords['z']:.4f}",
                 ]
             )
 
-        fps = 1.0 / max(1e-9, (disp_ts - self.last_tick))
-        self.last_tick = disp_ts
+        fps = 1.0 / max(1e-9, (color_ts - self.last_tick))
+        self.last_tick = color_ts
 
         self.node.get_logger().info(
             f"Frame {self.frame}: Detected {len(dets_xywh)} objects, FPS: {fps:.2f}"
@@ -374,9 +316,9 @@ class Vision:
         self.frame += 1
 
         # Stream processed image back to publisher
-        processed_img_msg: Image = self.br.cv2_to_imgmsg(resize_img, encoding="bgr8")
-        processed_img_msg.header.stamp.sec = int(disp_ts)
-        processed_img_msg.header.stamp.nanosec = int((disp_ts - int(disp_ts)) * 1e9)
+        processed_img_msg: Image = self.br.cv2_to_imgmsg(cv_image, encoding="bgr8")
+        processed_img_msg.header.stamp.sec = int(color_ts)
+        processed_img_msg.header.stamp.nanosec = int((color_ts - int(color_ts)) * 1e9)
         self.processed_pub.publish(processed_img_msg)
 
     def process_frames_threaded(self) -> None:
@@ -388,30 +330,10 @@ class Vision:
                 sleep_time = max(0.0, (1.0 / MAX_FPS) - elapsed)
                 time.sleep(sleep_time)
 
-    # def disparity_to_depth_m(
-    #     self,
-    #     disp_u16: np.ndarray,
-    #     scale: float,
-    #     offset: float,
-    #     focal_px: float,
-    #     baseline_m: float,
-    #     invalid_value: float,
-    # ) -> np.ndarray:
-    #     d = (disp_u16.astype(np.float32) / float(scale)) + float(offset)
-    #     # d[d <= max(1e-12, float(invalid_value))] = np.nan
-    #     # focal_px = 7.0
-    #     # baseline_m = 0.12
-    #     self.node.get_logger().info(
-    #         f"Disparity stats: {float(focal_px) * float(baseline_m) / d}"
-    #     )
-    #     return (float(focal_px) * float(baseline_m)) / d
-
-    def annotate_image(self, cv_image, x, y, w, h, tid, name, score, Zm=None) -> None:
-        color = (0, 220, 0) if Zm is not None else (80, 80, 80)
+    def annotate_image(self, cv_image, x, y, w, h, tid, name, score, coords) -> None:
+        color = (0, 220, 0)
         cv2.rectangle(cv_image, (x, y), (x + w, y + h), color, 2)
-        label = f"id {tid}  {name} {score:.2f}" + (
-            f"  Z={Zm:.2f}m" if Zm is not None else "None"
-        )
+        label = f"id {tid}  {name} {score:.2f} [{coords['x']:.4f}, {coords['y']:.4f}, {coords['z']:.4f}]"
         cv2.putText(
             cv_image,
             label,

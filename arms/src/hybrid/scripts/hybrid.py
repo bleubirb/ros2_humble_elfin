@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from asyncio import Future
 import os
-
 import threading
 import time
+from asyncio import Future
 from statistics import mean
 
 import numpy as np
 import rclpy
+from geometry_msgs.msg import Pose
 from helpers import DataBucket, DataRecorder
-from move_solver import Action, JointAction, MoveSolver, JOINT_MAX_LIMITS, JOINT_MIN_LIMITS
-
+from move_solver import (
+    JOINT_MAX_LIMITS,
+    JOINT_MIN_LIMITS,
+    Action,
+    JointAction,
+    MoveSolver,
+)
 from onrobot_rg2ft_control.OnRobotRG2FT import OnRobotRG2FT
 from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
-
 from sensor_msgs.msg import JointState
 
 DISABLE_PNS_LOGGING = False
@@ -112,9 +116,7 @@ class PNS_Driver:
 
         if self.x0 is None:
             if x < MIN_BERRY_WIDTH:
-                self.log(
-                    "Initial gripper width too small, berry is likely overripe."
-                )
+                self.log("Initial gripper width too small, berry is likely overripe.")
                 return 0, None, None
 
             self.x0 = x
@@ -313,9 +315,7 @@ class PNS_Driver:
                 # self.fd = 0
 
                 # attempt to regrip if object slipped, wait 5 seconds before regrip
-                self.log(
-                    "Object slip detected, attempting to regrip..."
-                )
+                self.log("Object slip detected, attempting to regrip...")
 
                 last_prox = ProxAvg
 
@@ -349,9 +349,7 @@ class PNS_Driver:
                 # time.sleep(5)
                 # desired_force = 1.5
                 # self.fd = 1.5
-                self.log(
-                    "Regrip command sent, resuming force control..."
-                )
+                self.log("Regrip command sent, resuming force control...")
                 q = TIGHTEN
                 # self.done = False
                 continue
@@ -442,9 +440,7 @@ class PNS_Driver:
                         bucket.baseline_w = self.x0 if self.x0 is not None else 0.0
                         bucket.classification = fruit_state
                         if k is None:
-                            self.log(
-                                "Estimated spring constant: unknown"
-                            )
+                            self.log("Estimated spring constant: unknown")
                         else:
                             self.log(
                                 f"Estimated spring constant: {k:.5f} N/mm, fruit state: {fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
@@ -569,8 +565,10 @@ class PNS_Driver:
 
 
 class CmdMove(object):
-    def __init__(self, node):
+    def __init__(self, node, move_solver):
         self.node = node
+        self.move_solver = move_solver
+
         self.joints_sub = node.create_subscription(
             JointState,
             "/joint_states",
@@ -578,6 +576,11 @@ class CmdMove(object):
             10,
         )
         self.joints_pub = node.create_publisher(JointState, "joint_goal", 1)
+        self.pose_pub = node.create_publisher(Pose, "hybrid/robot_pose", 1)
+
+        self.camera_pose_sub = node.create_subscription(
+            Pose, "/vision/detected_poses", self.camera_pose_callback, 10
+        )
 
         self.joint_state = None
         self.joint_orders = None
@@ -591,13 +594,34 @@ class CmdMove(object):
             self.joint_orders = [0] * 6
             for i, name in enumerate(data.name):
                 self.joint_orders[i] = int(name.replace("elfin_joint", "")) - 1
-        
+
         tmp_state = [0] * 6
         for i, pos in enumerate(data.position):
             tmp_state[self.joint_orders[i]] = pos
-        
+
         self.joint_state = tmp_state
+
+        pos, ori = self.move_solver.pose_from_joints(self.joint_state)
+
+        # self.log(f"Current end-effector pose: pos={pos}, ori={ori}")
+
+        pose_msg = Pose()
+        pose_msg.position.x = pos[0]
+        pose_msg.position.y = pos[1]
+        pose_msg.position.z = pos[2]
+
+        pose_msg.orientation.x = ori[0]
+        pose_msg.orientation.y = ori[1]
+        pose_msg.orientation.z = ori[2]
+        pose_msg.orientation.w = ori[3]
+
+        self.pose_pub.publish(pose_msg)
+
         # self.log(f"Received joint state: {self.joint_state}")
+
+    def camera_pose_callback(self, data):
+        self.log(f"Received camera pose: pos=({data.position.x}, {data.position.y}, {data.position.z}), ori=({data.orientation.x}, {data.orientation.y}, {data.orientation.z}, {data.orientation.w})")
+        
 
     def dance(self, joints):
         self.log(f"Attempted joint state: {joints}")
@@ -627,13 +651,11 @@ class CmdMove(object):
                     return True
                 else:
                     if count % 10 == 0:
-                        self.log(
-                            "Waiting to reach goal..."
-                        )
+                        self.log("Waiting to reach goal...")
                         # self.log(f"Current joint state: {joint_state_np}")
                         # self.log(f"Target joint state: {joints}")
                     count += 1
-            
+
             time.sleep(0.1)
         return False
 
@@ -642,7 +664,8 @@ def pick_seq(position: list[float]) -> list[JointAction]:
     actions = []
     offset = 0.1  # meters
 
-    orientation = [-90, -112, 0]
+    # orientation = [-90, -112, 0]
+    orientation = [-90, 68, 0]
     force = 0.8  # for berry
     # force = 3.0 # for ball
 
@@ -654,26 +677,26 @@ def pick_seq(position: list[float]) -> list[JointAction]:
             orientation=orientation,
         )
     )
-    actions.append(JointAction(Action.MOVE, position=position, orientation=orientation))
+    # actions.append(JointAction(Action.MOVE, position=position, orientation=orientation))
 
     # grip
     # actions.append(JointAction(Action.GRIP, force=force))
 
     # pull down (-z) and back (-y)
-    actions.append(
-        JointAction(
-            Action.MOVE,
-            position=[position[0], position[1], position[2] - offset],
-            orientation=orientation,
-        )
-    )
-    actions.append(
-        JointAction(
-            Action.MOVE,
-            position=[position[0], position[1] - offset, position[2] - offset],
-            orientation=orientation,
-        )
-    )
+    # actions.append(
+    #     JointAction(
+    #         Action.MOVE,
+    #         position=[position[0], position[1], position[2] - offset],
+    #         orientation=orientation,
+    #     )
+    # )
+    # actions.append(
+    #     JointAction(
+    #         Action.MOVE,
+    #         position=[position[0], position[1] - offset, position[2] - offset],
+    #         orientation=orientation,
+    #     )
+    # )
 
     return actions
 
@@ -708,28 +731,30 @@ if __name__ == "__main__":
     ip = node.declare_parameter("ip", "192.168.1.1").get_parameter_value().string_value
     port = node.declare_parameter("port", "502").get_parameter_value().string_value
 
-    cm = CmdMove(node)
     ms = MoveSolver(node)
+    cm = CmdMove(node, ms)
     driver = PNS_Driver(node, ip, port)
 
     # spin required for subscriptions to work
     future = Future()
-    spin_thread = threading.Thread(target=rclpy.spin_until_future_complete, args=(node, future), daemon=True)
+    spin_thread = threading.Thread(
+        target=rclpy.spin_until_future_complete, args=(node, future), daemon=True
+    )
     spin_thread.start()
 
     time.sleep(1)
 
-    berry_loc = [-0.100, 0.620, 0.400]
+    berry_loc = [0.053, 0.720, 0.4546] # in mm
     drop_loc = [-0.300, 0.00, 0.200]
 
     HOME = JointAction(Action.MOVE, position=None, orientation=None)
 
     actions: list[JointAction] = [
         JointAction(Action.GRIP, force=0),
-        HOME,
+        # HOME,
         *pick_seq(berry_loc),
-        *drop_seq(drop_loc),
-        HOME,
+        # *drop_seq(drop_loc),
+        # HOME,
     ]
 
     joint_actions = dict()
@@ -804,18 +829,23 @@ if __name__ == "__main__":
             count = 0
             while not driver.get_done():
                 if count % 10 == 0:
-                    node.get_logger().info(f"Waiting for gripper to reach desired force for {i+1}")
+                    node.get_logger().info(
+                        f"Waiting for gripper to reach desired force for {i+1}"
+                    )
                 count += 1
                 time.sleep(0.5)
-        
+
         node.get_logger().info(f"Finished action {i+1}/{len(actions)}")
 
     log_file.close()
     node.get_logger().info(f"Data saved to data/hybrid_state_{f_idx}.csv")
     driver.stop()
     node.get_logger().info("It worked!")
-    
+
+    while True:
+        time.sleep(1)
+
     # cleanup
-    future.set_result(True)
-    spin_thread.join()
-    rclpy.shutdown()
+    # future.set_result(True)
+    # spin_thread.join()
+    # rclpy.shutdown()
