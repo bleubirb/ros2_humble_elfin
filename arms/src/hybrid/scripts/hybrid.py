@@ -44,7 +44,7 @@ def pick_seq(position: list[float]) -> list[JointAction]:
     actions.append(JointAction(Action.MOVE, position=position, orientation=BERRY_ROT))
 
     # grip
-    actions.append(JointAction(Action.GRIP, force=force))
+    # actions.append(JointAction(Action.GRIP, force=force))
 
     # pull down (-z) and back (-y)
     actions.append(
@@ -93,21 +93,26 @@ def handle_action(action: JointAction, ms: MoveSolver, cm: CmdMove):
 
         # log the move action, either as all zeros or with the specified position and orientation
         if action.position is None:
-            log_str = f"{time.time()},{Action.MOVE},{','.join(['0']*6)},0\n"
+            log_str = f"{time.time()},{Action.MOVE},{','.join(['0']*6)},0"
         else:
-            log_str = f"{time.time()},{Action.MOVE},{','.join([str(x) for x in action.position])},{','.join([str(x) for x in action.orientation])},0\n"
+            log_str = f"{time.time()},{Action.MOVE},{','.join([str(x) for x in action.position])},{','.join([str(x) for x in action.orientation])},0"
 
-        joints = ms.move(
+        valid, joints = ms.move(
             action.position,
             action.orientation,
             cm.joint_state or [0, 0, 0, 0, 0, 0],
         )
 
+        log_str += f",{int(valid)}\n"
+        if not valid:
+            node.get_logger().error("No valid joint solution found!")
+            return log_str
+        
         # execute the joint action
         cm.dance(joints)
     else:  # GRIP action
         node.get_logger().info(f"Setting desired force to {action.force} for {i+1}")
-        log_str = f"{time.time()},{Action.GRIP},{','.join(['0']*6)},{action.force}\n"
+        log_str = f"{time.time()},{Action.GRIP},{','.join(['0']*6)},{action.force},1\n"
 
         driver.set_fd(action.force)
 
@@ -148,9 +153,6 @@ if __name__ == "__main__":
         JointAction(Action.GRIP, force=0),
         HOME,
         JointAction(Action.MOVE, position=OBSERVE_LOC, orientation=[-90, 68, 0]),
-        # *pick_seq(berry_loc),
-        # *drop_seq(drop_loc),
-        # HOME,
     ]
 
     if not os.path.exists("data"):
@@ -159,7 +161,7 @@ if __name__ == "__main__":
     while os.path.exists(f"data/hybrid_state_{f_idx}.csv"):
         f_idx += 1
     log_file = open(f"data/hybrid_state_{f_idx}.csv", "w")
-    log_file.write("Time,State,X,Y,Z,RX,RY,RZ,F\n")
+    log_file.write("Time,State,X,Y,Z,RX,RY,RZ,F,Valid\n")
 
     for i, action in enumerate(actions):
         node.get_logger().info(f"Executing action {i+1}/{len(actions)}")
@@ -168,12 +170,15 @@ if __name__ == "__main__":
 
         node.get_logger().info(f"Finished action {i+1}/{len(actions)}")
 
+    # BEGIN BERRY SEQUENCE
+
     node.create_client(Ready, "/vision/set_ready").call_async(
         Ready.Request(ready_req=True)
     )
 
     def save_poses(msg: Berries):
         node.poses = msg.berries
+        node.get_logger().info(f"poses: {node.poses}")
 
     poses_sub = node.create_subscription(
         Berries,
@@ -189,23 +194,31 @@ if __name__ == "__main__":
         count += 1
         time.sleep(0.5)
 
+    X_OFFSET = -0.08
+    Y_OFFSET = 0.16
+    Z_OFFSET = 0.09
+
     for j, berry in enumerate(node.poses):
-        berry_loc = [
+        orig_berry_loc = [
             berry.pose.x,
+            berry.pose.z, # z and y are swapped since camera pose and robot coord differ
             berry.pose.y,
-            berry.pose.z,
         ]
-        node.get_logger().info(f"Berry {j+1}: {berry_loc}")
+        berry_loc = [orig_berry_loc[0] + X_OFFSET, orig_berry_loc[1] + Y_OFFSET, orig_berry_loc[2] + Z_OFFSET]
+        node.get_logger().info(f"Berry {j+1}: {orig_berry_loc} → {berry_loc}")
 
         pick_actions = pick_seq(berry_loc)
         drop_actions = drop_seq(DROP_LOC)
+        seq_actions = pick_actions + drop_actions
 
-        for k, action in enumerate(pick_actions + drop_actions):
-            node.get_logger().info(f"Executing action {k+1}/{len(actions)}")
+        for k, action in enumerate(seq_actions):
+            node.get_logger().info(f"Executing action {k+1}/{len(seq_actions)}")
 
             log_file.write(handle_action(action, ms, cm))
 
-            node.get_logger().info(f"Finished action {k+1}/{len(actions)}")
+            node.get_logger().info(f"Finished action {k+1}/{len(seq_actions)}")
+
+    # END BERRY SEQUENCE
 
     log_file.close()
     node.get_logger().info(f"Data saved to data/hybrid_state_{f_idx}.csv")

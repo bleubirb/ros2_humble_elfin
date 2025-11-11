@@ -82,7 +82,7 @@ class Vision:
             max_size=MAX_SIZE,
         )
 
-        self.tracker = CentroidTracker(max_dist_px=TRACK_MAX_DIST)
+        self.tracker = None
 
         if not os.path.exists(DATA_PATH):
             os.makedirs(DATA_PATH)
@@ -112,6 +112,8 @@ class Vision:
         )
 
         self.last_tick: float = 0.0
+
+        self.frame_count: int = 0
 
     def store_robot_pose(self, pose_msg: Pose) -> None:
         self.robot_pose = pose_msg
@@ -143,7 +145,12 @@ class Vision:
             TILE_OVERLAP,
             nms_thresh=TILE_NMS,
         )
+        if self.tracker is None:
+            self.tracker = CentroidTracker(max_dist_px=TRACK_MAX_DIST)
+        
         ids = self.tracker.update(dets_xywh) if dets_xywh else []
+
+        self.frame_count += 1
 
         berries = []
 
@@ -268,7 +275,9 @@ class Vision:
                     else:
                         self.node.get_logger().error("No depth data received")
 
-            if coords["x"] != float("nan"):
+            
+
+            if coords["x"] != float("nan") and self.frame_count % 5 == 0:
                 berries.append(
                     BerryPose(
                         id=tid, pose=Point(x=coords["x"], y=coords["y"], z=coords["z"])
@@ -310,11 +319,14 @@ class Vision:
         self.processed_pub.publish(processed_img_msg)
 
         # Publish detected poses
-        berries_msg = Berries(berries=berries)
-        self.poses_pub.publish(berries_msg)
 
         # don't run again unless commanded
-        self.ready = False
+        if self.frame_count % 5 == 0:
+            berries_msg = Berries(berries=berries)
+            self.poses_pub.publish(berries_msg)
+            self.frame_count = 0
+            self.ready = False
+            self.tracker = None
 
     def annotate_image(self, cv_image, x, y, w, h, tid, name, score, coords) -> None:
         color = (0, 220, 0)

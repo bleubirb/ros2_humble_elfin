@@ -434,6 +434,25 @@ class PNS_Driver:
                                 f"Estimated spring constant: {k:.5f} N/mm, fruit state: {fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
                             )
 
+                        if fruit_state == "overripe":
+                            self.log(
+                                "overripe berry detected, releasing grip"
+                            )
+                            self.fd = 0
+                            desired_force = 0
+                            tmp_width = OPEN_WIDTH
+                        elif fruit_state == "unknown":
+                            self.log(
+                                "unable to estimate berry ripeness, releasing grip"
+                            )
+                            self.fd = 0
+                            desired_force = 0
+                            tmp_width = OPEN_WIDTH
+                        elif fruit_state == "ripe":
+                            self.log(
+                                "ripe berry detected, holding grip"
+                            )
+
                     if width < MIN_BERRY_WIDTH:
                         min_width_exit_counter += 1
                         self.log(

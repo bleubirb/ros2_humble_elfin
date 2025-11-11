@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import math
 import os.path
 from dataclasses import dataclass
 from enum import Enum
@@ -247,7 +248,7 @@ class MoveSolver:
                     drag_joints[4] += drag_joints[2]
                     drag_joints[2] *= -1
 
-                    drag_joints = self.compute(
+                    _, drag_joints = self.compute(
                         target_pose, target_orientation, drag_joints, retry=True
                     )
                     return self.check_pose(
@@ -266,7 +267,7 @@ class MoveSolver:
                     drag_joints[4] += drag_joints[2]
                     drag_joints[2] *= -1
 
-                    drag_joints = self.compute(
+                    _, drag_joints = self.compute(
                         target_pose, target_orientation, drag_joints, retry=True
                     )
                     return self.check_pose(
@@ -284,7 +285,7 @@ class MoveSolver:
 
     def compute(
         self, target_pose, target_orientation, starting_joint_state, retry=False
-    ):
+    ) -> list[float]:
         theta_vals = np.array(starting_joint_state, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
         target_orientation = np.array(target_orientation, dtype=float)
@@ -418,11 +419,11 @@ class MoveSolver:
         f.close()
 
         if retry:
-            return theta_vals.tolist()
+            return True, theta_vals.tolist()
 
         valid, theta_vals = self.check_pose(theta_vals, target_pose, target_orientation)
         self.log(f"{'Valid' if valid else 'Invalid'} pose: {theta_vals}")
-        return theta_vals.tolist()
+        return valid, theta_vals.tolist()
 
     def move(
         self,
@@ -431,7 +432,7 @@ class MoveSolver:
         starting_joint_state: list[float],
     ):
         if position is None:
-            return [0, 0, 0, 0, 0, 0]
+            return True, [0, 0, 0, 0, 0, 0]
         elif (
             len(position) != 3
             or len(orientation) != 3
@@ -449,7 +450,32 @@ class MoveSolver:
             f"Received request: {target_pose}, {target_orientation}, {starting_joint_state}"
         )
 
-        return self.compute(target_pose, target_orientation, starting_joint_state)
+        valid, joints = self.compute(target_pose, target_orientation, starting_joint_state)
+
+        final_position, final_orientation = self.pose_from_joints(joints)
+        self.log(f"Final position: {final_position}")
+        self.log(f"Final orientation (quaternion): {final_orientation}")
+        
+        pos_error = np.linalg.norm(np.array(final_position) - target_pose)
+        
+        ori_mat = Rotation.from_euler(
+            "xyz", target_orientation, degrees=True
+        ).as_matrix()
+        
+        R_error = ori_mat @ Rotation.from_quat(final_orientation).as_matrix().T
+
+        theta_error = np.arccos(
+            np.clip((np.trace(R_error) - 1) / 2, -1, 1)
+        )  # angle error
+        
+        self.log(f"Position error: {pos_error}")
+        self.log(f"Orientation error (rad): {theta_error}")
+        
+        valid = valid and pos_error < 0.01 and theta_error < 0.1
+        self.log(f"Move validity: {f'{bcolors.OKGREEN}Valid' if valid else f'{bcolors.FAIL}Invalid'}{bcolors.ENDC}")
+
+        return valid, joints
+
 
     def plot(self, joints, target_position, target_orientation):
         vals = [
