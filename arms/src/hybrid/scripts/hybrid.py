@@ -8,6 +8,7 @@ from asyncio import Future
 
 import rclpy
 from cmd_move import CmdMove
+from geometry_msgs.msg import Point
 from move_solver import (
     Action,
     JointAction,
@@ -15,8 +16,7 @@ from move_solver import (
 )
 from pns_driver import PNS_Driver
 
-from vision_msgs.msg import Berries
-from vision_msgs.srv import Ready
+from vision_msgs.msg import Berries, BerryPose
 
 OBSERVE_LOC = [0.053, 0.500, 0.4546]  # in m
 DROP_LOC = [-0.300, 0.00, 0.200]
@@ -44,7 +44,7 @@ def pick_seq(position: list[float]) -> list[JointAction]:
     actions.append(JointAction(Action.MOVE, position=position, orientation=BERRY_ROT))
 
     # grip
-    # actions.append(JointAction(Action.GRIP, force=force))
+    actions.append(JointAction(Action.GRIP, force=force))
 
     # pull down (-z) and back (-y)
     actions.append(
@@ -107,7 +107,7 @@ def handle_action(action: JointAction, ms: MoveSolver, cm: CmdMove):
         if not valid:
             node.get_logger().error("No valid joint solution found!")
             return log_str
-        
+
         # execute the joint action
         cm.dance(joints)
     else:  # GRIP action
@@ -151,8 +151,8 @@ if __name__ == "__main__":
 
     actions: list[JointAction] = [
         JointAction(Action.GRIP, force=0),
-        HOME,
-        JointAction(Action.MOVE, position=OBSERVE_LOC, orientation=[-90, 68, 0]),
+        # HOME,
+        JointAction(Action.MOVE, position=OBSERVE_LOC, orientation=BERRY_ROT),
     ]
 
     if not os.path.exists("data"):
@@ -172,39 +172,49 @@ if __name__ == "__main__":
 
     # BEGIN BERRY SEQUENCE
 
-    node.create_client(Ready, "/vision/set_ready").call_async(
-        Ready.Request(ready_req=True)
-    )
+    # node.create_client(Ready, "/vision/set_ready").call_async(
+    #     Ready.Request(ready_req=True)
+    # )
 
-    def save_poses(msg: Berries):
-        node.poses = msg.berries
-        node.get_logger().info(f"poses: {node.poses}")
+    # def save_poses(msg: Berries):
+    #     node.poses = msg.berries
+    #     node.get_logger().info(f"poses: {node.poses}")
 
-    poses_sub = node.create_subscription(
-        Berries,
-        "/vision/detected_poses",
-        save_poses,
-        1,
-    )
+    # poses_sub = node.create_subscription(
+    #     Berries,
+    #     "/vision/detected_poses",
+    #     save_poses,
+    #     1,
+    # )
 
-    count = 0
-    while not hasattr(node, "poses"):
-        if count % 10 == 0:
-            node.get_logger().info("Waiting for berry poses...")
-        count += 1
-        time.sleep(0.5)
+    # count = 0
+    # while not hasattr(node, "poses"):
+    #     if count % 10 == 0:
+    #         node.get_logger().info("Waiting for berry poses...")
+    #     count += 1
+    #     time.sleep(0.5)
 
-    X_OFFSET = -0.08
-    Y_OFFSET = 0.16
-    Z_OFFSET = 0.09
+    # HARDCODE BERRY POSES FOR TESTING
+    node.poses = [
+        BerryPose(id=1, pose=Point(x=0.0, y=0.41, z=0.0)),
+        BerryPose(id=2, pose=Point(x=-0.06, y=0.43, z=-0.05)),
+    ]
+
+    X_OFFSET = -0.060
+    Y_OFFSET = -0.185
+    Z_OFFSET = 0.030
 
     for j, berry in enumerate(node.poses):
         orig_berry_loc = [
             berry.pose.x,
-            berry.pose.z, # z and y are swapped since camera pose and robot coord differ
             berry.pose.y,
+            berry.pose.z,
         ]
-        berry_loc = [orig_berry_loc[0] + X_OFFSET, orig_berry_loc[1] + Y_OFFSET, orig_berry_loc[2] + Z_OFFSET]
+        berry_loc = [
+            OBSERVE_LOC[0] + orig_berry_loc[0] + X_OFFSET,
+            OBSERVE_LOC[1] + orig_berry_loc[1] + Y_OFFSET,
+            OBSERVE_LOC[2] + orig_berry_loc[2] + Z_OFFSET,
+        ]
         node.get_logger().info(f"Berry {j+1}: {orig_berry_loc} → {berry_loc}")
 
         pick_actions = pick_seq(berry_loc)
@@ -223,7 +233,7 @@ if __name__ == "__main__":
     log_file.close()
     node.get_logger().info(f"Data saved to data/hybrid_state_{f_idx}.csv")
     driver.stop()
-    node.get_logger().info("It worked!")
+    node.get_logger().info("It worked!\n")
 
     # while True:
     #     time.sleep(1)

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import math
 import os.path
 from dataclasses import dataclass
 from enum import Enum
@@ -55,7 +54,7 @@ class JointAction:
                 raise ValueError("Force must be provided for GRIP action.")
 
 
-JOINT_MIN_LIMITS = [-3.14, -2.04, -2.61, -3.14, -1.04, -3.14]
+JOINT_MIN_LIMITS = [-3.14, -2.04, -2.61, -3.14, -2.56, -3.14]
 JOINT_MAX_LIMITS = [3.14, 2.04, 2.61, 3.14, 2.56, 3.14]
 
 END_EFFECTOR_ATTACHED = True
@@ -450,32 +449,35 @@ class MoveSolver:
             f"Received request: {target_pose}, {target_orientation}, {starting_joint_state}"
         )
 
-        valid, joints = self.compute(target_pose, target_orientation, starting_joint_state)
+        valid, joints = self.compute(
+            target_pose, target_orientation, starting_joint_state
+        )
 
         final_position, final_orientation = self.pose_from_joints(joints)
         self.log(f"Final position: {final_position}")
         self.log(f"Final orientation (quaternion): {final_orientation}")
-        
+
         pos_error = np.linalg.norm(np.array(final_position) - target_pose)
-        
+
         ori_mat = Rotation.from_euler(
             "xyz", target_orientation, degrees=True
         ).as_matrix()
-        
+
         R_error = ori_mat @ Rotation.from_quat(final_orientation).as_matrix().T
 
         theta_error = np.arccos(
             np.clip((np.trace(R_error) - 1) / 2, -1, 1)
         )  # angle error
-        
+
         self.log(f"Position error: {pos_error}")
         self.log(f"Orientation error (rad): {theta_error}")
-        
+
         valid = valid and pos_error < 0.01 and theta_error < 0.1
-        self.log(f"Move validity: {f'{bcolors.OKGREEN}Valid' if valid else f'{bcolors.FAIL}Invalid'}{bcolors.ENDC}")
+        self.log(
+            f"Move validity: {f'{bcolors.OKGREEN}Valid' if valid else f'{bcolors.FAIL}Invalid'}{bcolors.ENDC}"
+        )
 
         return valid, joints
-
 
     def plot(self, joints, target_position, target_orientation):
         vals = [

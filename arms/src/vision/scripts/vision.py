@@ -4,10 +4,11 @@
 import csv
 import json
 import os
-import subprocess
+import time
 
 import cv2
 import rclpy
+import requests
 from cv_bridge import CvBridge
 from detector import ExactDetector, run_detector_tiled
 from geometry_msgs.msg import Point, Pose
@@ -147,7 +148,7 @@ class Vision:
         )
         if self.tracker is None:
             self.tracker = CentroidTracker(max_dist_px=TRACK_MAX_DIST)
-        
+
         ids = self.tracker.update(dets_xywh) if dets_xywh else []
 
         self.frame_count += 1
@@ -164,120 +165,76 @@ class Vision:
             score = det_scores[i]
             coords = {"x": float("nan"), "y": float("nan"), "z": float("nan")}
 
-            if self.robot_pose is not None:
+            payload_args = {
+                "pose_frame": "camera",
+                "region_of_interest_2d": {
+                    "offset_x": int(x),
+                    "offset_y": int(y),
+                    "width": int(w),
+                    "height": int(h),
+                },
+                "cell_count": {"x": 1, "y": 1},
+            }
+            payload = {"args": payload_args}
+            payload_json = json.dumps(payload)
+            url = "http://192.168.1.104/api/v2/pipelines/0/nodes/rc_measure/services/measure_depth"
+
+            for _ in range(3):
+                resp = requests.put(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    data=payload_json,
+                    timeout=5.0,
+                )
+
                 try:
-                    payload_args = {
-                        "pose_frame": "external",
-                        "region_of_interest_2d": {
-                            "offset_x": int(x),
-                            "offset_y": int(y),
-                            "width": int(w),
-                            "height": int(h),
-                        },
-                        "cell_count": {"x": 1, "y": 1},
-                        "robot_pose": {
-                            "position": {
-                                "x": float(self.robot_pose.position.x),
-                                "y": float(self.robot_pose.position.y),
-                                "z": float(self.robot_pose.position.z),
-                            },
-                            "orientation": {
-                                "x": float(self.robot_pose.orientation.x),
-                                "y": float(self.robot_pose.orientation.y),
-                                "z": float(self.robot_pose.orientation.z),
-                                "w": float(self.robot_pose.orientation.w),
-                            },
-                        },
-                    }
-                    payload = {"args": payload_args}
-                    payload_json = json.dumps(payload)
-                    url = "http://192.168.1.104/api/v2/pipelines/0/nodes/rc_measure/services/measure_depth"
-
-                    # self.node.get_logger().info(f"Depth request payload: {payload}")
-
-                    cmd = [
-                        "curl",
-                        "-s",
-                        "-X",
-                        "PUT",
-                        url,
-                        "-H",
-                        "Content-Type: application/json",
-                        "-d",
-                        payload_json,
-                        "-w",
-                        "\n%{http_code}",
-                    ]
-                    proc = subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=5.0
+                    # self.node.get_logger().info(
+                    #     f"Depth response status: {resp.status_code}"
+                    # )
+                    resp.raise_for_status()
+                    # self.node.get_logger().info(f"Depth response body: {resp.text}")
+                    depth_info = resp.json()
+                    # self.node.get_logger().info(f"Depth response body: {depth_info}")
+                except:
+                    self.node.get_logger().error(
+                        "Depth response not successful or not JSON"
                     )
+                    depth_info = None
 
-                    if proc.stderr:
-                        self.node.get_logger().debug(
-                            f"curl stderr: {proc.stderr.strip()}"
-                        )
+                # parse depth_info and set coords
+                if depth_info is not None:
+                    resp_body = depth_info.get("response", depth_info)
 
-                    stdout = proc.stdout or ""
-                    body, sep, status = stdout.rpartition("\n")
-                    if not sep:
-                        body = stdout
-                        status_code = None
-                    else:
-                        status_code = int(status) if status.isdigit() else None
+                    overall = resp_body.get("overall", {})
+                    mean_overall = overall.get("mean_z", {})
 
-                    class _Resp:
-                        def __init__(self, status_code, text):
-                            self.status_code = status_code
-                            self.text = text
+                    # self.node.get_logger().info(f"Mean overall depth: {mean_overall}")
 
-                        def json(self):
-                            return json.loads(self.text)
+                    mz_x = float(mean_overall.get("x"))
+                    mz_y = float(mean_overall.get("y"))
+                    mz_z = float(mean_overall.get("z"))
 
-                    resp = _Resp(status_code, body)
-                except subprocess.TimeoutExpired as exc:
-                    self.node.get_logger().error(f"Depth request timed out: {exc}")
-                    resp = None
-                except Exception as exc:
-                    self.node.get_logger().error(f"Depth request failed: {exc}")
-                    resp = None
+                    coords["x"] = mz_x
+                    coords["y"] = mz_z  # robot coords
+                    coords["z"] = mz_y
 
-                if resp is not None:
-                    try:
-                        self.node.get_logger().info(
-                            f"Depth response status: {resp.status_code}"
-                        )
-                        # self.node.get_logger().info(f"Depth response body: {resp.text}")
-                        depth_info = resp.json()
-                    except ValueError:
-                        self.node.get_logger().error("Depth response not JSON")
-                        depth_info = None
+                    self.node.get_logger().info(
+                        f"Detection {i} (ID {tid}): 3D coords: X={coords['x']:.4f} Y={coords['y']:.4f} Z={coords['z']:.4f}"
+                    )
+                    if coords["x"] != 0.0 and coords["y"] != 0.0 and coords["z"] != 0.0:
+                        break  # valid data received, exit retry loop
+                else:
+                    self.node.get_logger().error("No depth data received")
 
-                    # parse depth_info and set coords
-                    if depth_info is not None:
-                        resp_body = depth_info.get("response", depth_info)
+                time.sleep(0.5)  # wait before retrying
 
-                        overall = resp_body.get("overall", {})
-                        mean_overall = overall.get("mean_z", {})
-
-                        # self.node.get_logger().info(f"Mean overall depth: {mean_overall}")
-
-                        mz_x = float(mean_overall.get("x"))
-                        mz_y = float(mean_overall.get("y"))
-                        mz_z = float(mean_overall.get("z"))
-
-                        coords["x"] = mz_x
-                        coords["y"] = mz_z  # robot coords
-                        coords["z"] = mz_y
-
-                        self.node.get_logger().info(
-                            f"Detection {i} (ID {tid}): 3D coords: X={coords['x']:.4f} Y={coords['y']:.4f} Z={coords['z']:.4f}"
-                        )
-                    else:
-                        self.node.get_logger().error("No depth data received")
-
-            
-
-            if coords["x"] != float("nan") and self.frame_count % 5 == 0:
+            if (
+                coords["x"] != float("nan")
+                and coords["x"] != 0.0
+                and coords["y"] != 0.0
+                and coords["z"] != 0.0
+                and self.frame_count % 5 == 0
+            ):
                 berries.append(
                     BerryPose(
                         id=tid, pose=Point(x=coords["x"], y=coords["y"], z=coords["z"])
@@ -307,10 +264,10 @@ class Vision:
         fps = 1.0 / max(1e-9, (ts - self.last_tick))
         self.last_tick = ts
 
+        self.frame += 1
         self.node.get_logger().info(
             f"Frame {self.frame}: Detected {len(dets_xywh)} objects, FPS: {fps:.2f}"
         )
-        self.frame += 1
 
         # Stream processed image back to publisher
         processed_img_msg: Image = self.br.cv2_to_imgmsg(cv_image, encoding="bgr8")
@@ -318,15 +275,16 @@ class Vision:
         processed_img_msg.header.stamp.nanosec = int((ts - int(ts)) * 1e9)
         self.processed_pub.publish(processed_img_msg)
 
-        # Publish detected poses
-
-        # don't run again unless commanded
+        # after 5 frames
         if self.frame_count % 5 == 0:
+            # Publish detected poses
             berries_msg = Berries(berries=berries)
             self.poses_pub.publish(berries_msg)
-            self.frame_count = 0
+
+            # don't run again unless commanded
             self.ready = False
             self.tracker = None
+            self.frame_count = 0
 
     def annotate_image(self, cv_image, x, y, w, h, tid, name, score, coords) -> None:
         color = (0, 220, 0)

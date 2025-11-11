@@ -50,6 +50,7 @@ class PNS_Driver:
         self.force_ema = None
         self.last_compression_ema = None
         self.contact_counter = 0
+        self.fruit_state = "unclassified"
 
         self.thread = threading.Thread(target=self.loop)
         self.thread.start()
@@ -215,7 +216,7 @@ class PNS_Driver:
         MOVING_AVG_LEN_PROX = 100
         MOVING_AVG_LEN_K = 100
 
-        SLOW_FORCE_BOUND = 0.5
+        SLOW_FORCE_BOUND = 0.2
 
         # hysteresis thresholds
         DELTA2 = 0.3
@@ -265,6 +266,7 @@ class PNS_Driver:
                 desired_force = self.fd
                 reached_hold_time = float("inf")
                 start_time = time.time()
+                self.fruit_state = "unclassified"
 
             bucket.fd = desired_force
 
@@ -421,36 +423,17 @@ class PNS_Driver:
                         [k, F_pred, error] = self.update_rls(
                             time.time(), width, force_avg
                         )
-                        fruit_state = self.classify(k)
+                        self.fruit_state = self.classify(k)
                         bucket.k = k
                         bucket.F_pred = F_pred
                         bucket.rls_error = error
                         bucket.baseline_w = self.x0 if self.x0 is not None else 0.0
-                        bucket.classification = fruit_state
+                        bucket.classification = self.fruit_state
                         if k is None:
                             self.log("Estimated spring constant: unknown")
                         else:
                             self.log(
-                                f"Estimated spring constant: {k:.5f} N/mm, fruit state: {fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
-                            )
-
-                        if fruit_state == "overripe":
-                            self.log(
-                                "overripe berry detected, releasing grip"
-                            )
-                            self.fd = 0
-                            desired_force = 0
-                            tmp_width = OPEN_WIDTH
-                        elif fruit_state == "unknown":
-                            self.log(
-                                "unable to estimate berry ripeness, releasing grip"
-                            )
-                            self.fd = 0
-                            desired_force = 0
-                            tmp_width = OPEN_WIDTH
-                        elif fruit_state == "ripe":
-                            self.log(
-                                "ripe berry detected, holding grip"
+                                f"Estimated spring constant: {k:.5f} N/mm, fruit state: {self.fruit_state}, F_pred: {F_pred:.2f}, F: {force_avg:.2f}, baseline width (x0): {self.x0:.2f} mm"
                             )
 
                     if width < MIN_BERRY_WIDTH:
@@ -469,11 +452,11 @@ class PNS_Driver:
                 if q == HOLD:
                     pass
                 elif q == TIGHTEN:  # move smaller
-                    tmp_width -= SPEED_SLOW
-                elif q == LOOSEN:
-                    tmp_width += SPEED_SLOW
-                elif q == TIGHTEN_FAST:
                     tmp_width -= SPEED_NORMAL
+                elif q == LOOSEN:
+                    tmp_width += SPEED_NORMAL
+                elif q == TIGHTEN_FAST:
+                    tmp_width -= SPEED_FAST
                 elif q == LOOSEN_SLOW:
                     tmp_width += SPEED_SLOW
                 elif q == TIGHTEN_SLOW:
@@ -559,6 +542,26 @@ class PNS_Driver:
                 )
             ) or (min_width_exit_counter >= MIN_WIDTH_EXIT_LOOPS):
                 self.done = True
+                if self.fruit_state == "overripe":
+                    self.log("overripe berry detected, releasing grip")
+                    self.fd = 0
+                    desired_force = 0
+                    tmp_width = OPEN_WIDTH
+                    cmd.target_width = int(round(tmp_width))
+                    self.gripper.writeCommand(cmd)
+                    last_prox = 1000
+                elif self.fruit_state == "unknown":
+                    self.log(
+                        "unable to estimate berry ripeness, releasing grip"
+                    )
+                    self.fd = 0
+                    desired_force = 0
+                    tmp_width = OPEN_WIDTH
+                    cmd.target_width = int(round(tmp_width))
+                    self.gripper.writeCommand(cmd)
+                    last_prox = 1000
+                elif self.fruit_state == "ripe":
+                    self.log("ripe berry detected, holding grip")
             # else:
             #     self.log(f"\nTime left: {MAX_GRIP_TIME - (time.time() - start_time):.2f}\n")
 
