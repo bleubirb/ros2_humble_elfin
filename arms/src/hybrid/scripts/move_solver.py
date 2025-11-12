@@ -28,6 +28,7 @@ class bcolors:
 class Action(Enum):
     MOVE = 0
     GRIP = 1
+    FIND = 2
 
 
 @dataclass

@@ -8,7 +8,6 @@ from asyncio import Future
 
 import rclpy
 from cmd_move import CmdMove
-from geometry_msgs.msg import Point
 from move_solver import (
     Action,
     JointAction,
@@ -16,9 +15,10 @@ from move_solver import (
 )
 from pns_driver import PNS_Driver
 
-from vision_msgs.msg import Berries, BerryPose
+from vision_msgs.msg import Berries
+from vision_msgs.srv import Ready
 
-OBSERVE_LOC = [0.053, 0.500, 0.4546]  # in m
+OBSERVE_LOC = [0.053, 0.500, 0.400]  # in m
 DROP_LOC = [-0.300, 0.00, 0.200]
 
 # gripper is rotated 22 deg wrt horizontal when picking berries
@@ -26,11 +26,27 @@ BERRY_ROT = [-90, 68, 0]  # in degrees
 DROP_ROT = [-179.5, 0, 0]
 
 
+def close_seq(position: list[float]) -> list[JointAction]:
+    actions = []
+
+    # close-up view (-y, -z)
+    actions.append(
+        JointAction(
+            Action.MOVE,
+            position=[position[0], position[1] - 0.15, position[2] - 0.1],
+            orientation=BERRY_ROT,
+        )
+    )
+    actions.append(JointAction(Action.FIND))
+
+    return actions
+
+
 def pick_seq(position: list[float]) -> list[JointAction]:
     actions = []
     offset = 0.1  # meters
 
-    force = 0.8  # for berry
+    force = 0.5  # for berry
     # force = 3.0 # for ball
 
     # approach (-y)
@@ -44,7 +60,7 @@ def pick_seq(position: list[float]) -> list[JointAction]:
     actions.append(JointAction(Action.MOVE, position=position, orientation=BERRY_ROT))
 
     # grip
-    actions.append(JointAction(Action.GRIP, force=force))
+    # actions.append(JointAction(Action.GRIP, force=force))
 
     # pull down (-z) and back (-y)
     actions.append(
@@ -84,7 +100,13 @@ def drop_seq(position: list[float]) -> list[JointAction]:
     return actions
 
 
-def handle_action(action: JointAction, ms: MoveSolver, cm: CmdMove):
+def handle_action(
+    action: JointAction,
+    ms: MoveSolver,
+    cm: CmdMove,
+    ready_client: rclpy.client.Client,
+    node: rclpy.node.Node,
+) -> str:
     log_str = ""
     if action.action == Action.MOVE:  # MOVE action
         node.get_logger().info(
@@ -110,7 +132,7 @@ def handle_action(action: JointAction, ms: MoveSolver, cm: CmdMove):
 
         # execute the joint action
         cm.dance(joints)
-    else:  # GRIP action
+    elif action.action == Action.GRIP:  # GRIP action
         node.get_logger().info(f"Setting desired force to {action.force} for {i+1}")
         log_str = f"{time.time()},{Action.GRIP},{','.join(['0']*6)},{action.force},1\n"
 
@@ -124,6 +146,17 @@ def handle_action(action: JointAction, ms: MoveSolver, cm: CmdMove):
                 )
             count += 1
             time.sleep(0.5)
+    else:  # FIND action
+        node.poses = None
+
+        ready_client.call_async(Ready.Request(ready_req=True))
+
+        count = 0
+        while getattr(node, "poses", None) is None:
+            if count % 10 == 0:
+                node.get_logger().info("Waiting for berry poses...")
+            count += 1
+            time.sleep(0.5)
 
     return log_str
 
@@ -133,6 +166,19 @@ if __name__ == "__main__":
     node = rclpy.create_node("hybrid_node")
     ip = node.declare_parameter("ip", "192.168.1.1").get_parameter_value().string_value
     port = node.declare_parameter("port", "502").get_parameter_value().string_value
+
+    ready_client = node.create_client(Ready, "/vision/set_ready")
+
+    def save_poses(msg: Berries):
+        node.poses = msg.berries
+        node.get_logger().info(f"poses: {node.poses}")
+
+    poses_sub = node.create_subscription(
+        Berries,
+        "/vision/detected_poses",
+        save_poses,
+        1,
+    )
 
     ms = MoveSolver(node)
     cm = CmdMove(node, ms)
@@ -147,12 +193,13 @@ if __name__ == "__main__":
 
     time.sleep(1)
 
-    HOME = JointAction(Action.MOVE, position=None, orientation=None)
+    HOME = JointAction(Action.MOVE)
 
     actions: list[JointAction] = [
         JointAction(Action.GRIP, force=0),
         # HOME,
         JointAction(Action.MOVE, position=OBSERVE_LOC, orientation=BERRY_ROT),
+        JointAction(Action.FIND),
     ]
 
     if not os.path.exists("data"):
@@ -166,65 +213,89 @@ if __name__ == "__main__":
     for i, action in enumerate(actions):
         node.get_logger().info(f"Executing action {i+1}/{len(actions)}")
 
-        log_file.write(handle_action(action, ms, cm))
+        log_file.write(handle_action(action, ms, cm, ready_client, node))
 
         node.get_logger().info(f"Finished action {i+1}/{len(actions)}")
 
     # BEGIN BERRY SEQUENCE
 
-    # node.create_client(Ready, "/vision/set_ready").call_async(
-    #     Ready.Request(ready_req=True)
-    # )
-
-    # def save_poses(msg: Berries):
-    #     node.poses = msg.berries
-    #     node.get_logger().info(f"poses: {node.poses}")
-
-    # poses_sub = node.create_subscription(
-    #     Berries,
-    #     "/vision/detected_poses",
-    #     save_poses,
-    #     1,
-    # )
-
-    # count = 0
-    # while not hasattr(node, "poses"):
-    #     if count % 10 == 0:
-    #         node.get_logger().info("Waiting for berry poses...")
-    #     count += 1
-    #     time.sleep(0.5)
-
     # HARDCODE BERRY POSES FOR TESTING
-    node.poses = [
-        BerryPose(id=1, pose=Point(x=0.0, y=0.41, z=0.0)),
-        BerryPose(id=2, pose=Point(x=-0.06, y=0.43, z=-0.05)),
-    ]
+    # node.poses = [
+    #     BerryPose(id=1, pose=Point(x=0.0, y=0.41, z=0.0)),
+    #     BerryPose(id=2, pose=Point(x=-0.06, y=0.43, z=-0.05)),
+    # ]
 
-    X_OFFSET = -0.060
-    Y_OFFSET = -0.185
-    Z_OFFSET = 0.030
+    # +x: from room to wall
+    # +y: away from arm, toward other arm
+    # +z: up?
 
-    for j, berry in enumerate(node.poses):
+    OBSERVE_X_OFFSET = -0.050
+    OBSERVE_Y_OFFSET = -0.095
+    OBSERVE_Z_OFFSET = -0.05 # TODO: calibrate
+
+    CLOSE_X_OFFSET = -0.050
+    CLOSE_Y_OFFSET = -0.095
+    CLOSE_Z_OFFSET = -0.03 # TODO: calibrate
+
+    orig_berry_locs = node.poses.copy()
+
+    for j, berry in enumerate(orig_berry_locs[:1]):
         orig_berry_loc = [
             berry.pose.x,
             berry.pose.y,
             berry.pose.z,
         ]
         berry_loc = [
-            OBSERVE_LOC[0] + orig_berry_loc[0] + X_OFFSET,
-            OBSERVE_LOC[1] + orig_berry_loc[1] + Y_OFFSET,
-            OBSERVE_LOC[2] + orig_berry_loc[2] + Z_OFFSET,
+            orig_berry_loc[0] + OBSERVE_X_OFFSET,
+            orig_berry_loc[1] + OBSERVE_Y_OFFSET,
+            orig_berry_loc[2] + OBSERVE_Z_OFFSET,
         ]
-        node.get_logger().info(f"Berry {j+1}: {orig_berry_loc} → {berry_loc}")
+        move_to_loc = [
+            OBSERVE_LOC[0] + berry_loc[0],
+            OBSERVE_LOC[1] + berry_loc[1],
+            OBSERVE_LOC[2] + berry_loc[2],
+        ]
+        node.get_logger().info(f"Berry {j+1}: {orig_berry_loc} → {berry_loc} → {move_to_loc}")
 
-        pick_actions = pick_seq(berry_loc)
+        closeup_actions = close_seq(move_to_loc)
+        for k, action in enumerate(closeup_actions):
+            node.get_logger().info(
+                f"Executing close-up action {k+1}/{len(closeup_actions)}"
+            )
+
+            log_file.write(handle_action(action, ms, cm, ready_client, node))
+
+            node.get_logger().info(
+                f"Finished close-up action {k+1}/{len(closeup_actions)}"
+            )
+
+        close_berry_loc = [
+            node.poses[0].pose.x,
+            node.poses[0].pose.y,
+            node.poses[0].pose.z,
+        ]
+        revised_berry_loc = [
+            close_berry_loc[0] + CLOSE_X_OFFSET,
+            close_berry_loc[1] + CLOSE_Y_OFFSET,
+            close_berry_loc[2] + CLOSE_Z_OFFSET,
+        ]
+        revised_move_to_loc = [
+            berry_loc[0] + revised_berry_loc[0],
+            berry_loc[1] + revised_berry_loc[1],
+            berry_loc[2] + revised_berry_loc[2],
+        ]
+        node.get_logger().info(
+            f"Revised Berry {j+1} location: {close_berry_loc} → {revised_berry_loc} → {revised_move_to_loc}"
+        )
+
+        pick_actions = pick_seq(revised_move_to_loc)
         drop_actions = drop_seq(DROP_LOC)
         seq_actions = pick_actions + drop_actions
 
         for k, action in enumerate(seq_actions):
             node.get_logger().info(f"Executing action {k+1}/{len(seq_actions)}")
 
-            log_file.write(handle_action(action, ms, cm))
+            log_file.write(handle_action(action, ms, cm, ready_client, node))
 
             node.get_logger().info(f"Finished action {k+1}/{len(seq_actions)}")
 

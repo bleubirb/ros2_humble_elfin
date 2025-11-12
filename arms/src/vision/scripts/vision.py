@@ -146,6 +146,19 @@ class Vision:
             TILE_OVERLAP,
             nms_thresh=TILE_NMS,
         )
+
+        # if nothing found, try again
+        if not dets_xywh:
+            dets_xywh, det_scores, _ = run_detector_tiled(
+                self.detector,
+                cv_image,
+                SCORE_THRESH,
+                TILE_ROWS,
+                TILE_COLS,
+                TILE_OVERLAP,
+                nms_thresh=TILE_NMS,
+            )
+
         if self.tracker is None:
             self.tracker = CentroidTracker(max_dist_px=TRACK_MAX_DIST)
 

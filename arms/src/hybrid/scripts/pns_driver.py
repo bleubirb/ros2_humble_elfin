@@ -18,7 +18,7 @@ FORCE_SCALE = 1.0
 CONTACT_REQUIRED = 3
 MAX_ERROR_RATIO = 0.5  # reject updates with error > 50% of force
 THRESHOLD_UNRIPE = 0.06
-THRESHOLD_OVERRIPE = 0.01
+THRESHOLD_OVERRIPE = 0.015
 MIN_BERRY_WIDTH = 50  # mm, min width to consider for berry
 MAX_BERRY_WIDTH = 200  # mm, max width to consider for berry
 MIN_WIDTH_EXIT_LOOPS = 5  # number of loops with width below min to exit force control
@@ -216,7 +216,7 @@ class PNS_Driver:
         MOVING_AVG_LEN_PROX = 100
         MOVING_AVG_LEN_K = 100
 
-        SLOW_FORCE_BOUND = 0.2
+        SLOW_FORCE_BOUND = 0.3
 
         # hysteresis thresholds
         DELTA2 = 0.3
@@ -226,8 +226,8 @@ class PNS_Driver:
         # DELTA2 = 0.0
         # DELTA1 = 0.0
 
-        SPEED_FAST = 1.0
-        SPEED_NORMAL = 0.05 * 2
+        SPEED_FAST = 0.5
+        SPEED_NORMAL = 0.07
         SPEED_SLOW = 0.005
 
         OPEN_HOLD_TOLERANCE = 5
@@ -551,9 +551,7 @@ class PNS_Driver:
                     self.gripper.writeCommand(cmd)
                     last_prox = 1000
                 elif self.fruit_state == "unknown":
-                    self.log(
-                        "unable to estimate berry ripeness, releasing grip"
-                    )
+                    self.log("unable to estimate berry ripeness, releasing grip")
                     self.fd = 0
                     desired_force = 0
                     tmp_width = OPEN_WIDTH
