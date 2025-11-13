@@ -5,15 +5,12 @@ import os
 import threading
 import time
 from asyncio import Future
+from concurrent.futures import ThreadPoolExecutor
 
 import rclpy
 from cmd_move import CmdMove
-from move_solver import (
-    Action,
-    JointAction,
-    MoveSolver,
-    bcolors
-)
+from helpers import Action, JointAction
+from move_solver import MoveSolver, bcolors
 from pns_driver import PNS_Driver
 
 from vision_msgs.msg import Berries
@@ -32,7 +29,9 @@ CLOSEUP_OFFSET_Y = 0.15  # in m
 APPROACH_OFFSET_Y = 0.1  # in m
 
 
-def closeup_seq(position: list[float]) -> list[JointAction]:
+def closeup_seq(
+    position: list[float], ms: MoveSolver, cm: CmdMove, executor: ThreadPoolExecutor
+) -> list[JointAction]:
     actions = []
 
     # close-up view (-y, -z)
@@ -41,6 +40,9 @@ def closeup_seq(position: list[float]) -> list[JointAction]:
             Action.MOVE,
             position=[position[0], position[1] - CLOSEUP_OFFSET_Y, position[2]],
             orientation=BERRY_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
         )
     )
     actions.append(JointAction(Action.FIND))
@@ -48,7 +50,9 @@ def closeup_seq(position: list[float]) -> list[JointAction]:
     return actions
 
 
-def rotated_seq(position: list[float]) -> list[JointAction]:
+def rotated_seq(
+    position: list[float], ms: MoveSolver, cm: CmdMove, executor: ThreadPoolExecutor
+) -> list[JointAction]:
     actions = []
 
     # close-up view (-y, -z)
@@ -61,6 +65,9 @@ def rotated_seq(position: list[float]) -> list[JointAction]:
                 position[2],
             ],
             orientation=BERRY_OBS_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
         )
     )
     actions.append(JointAction(Action.FIND))
@@ -68,7 +75,9 @@ def rotated_seq(position: list[float]) -> list[JointAction]:
     return actions
 
 
-def pick_seq(position: list[float]) -> list[JointAction]:
+def pick_seq(
+    position: list[float], ms: MoveSolver, cm: CmdMove, executor: ThreadPoolExecutor
+) -> list[JointAction]:
     actions = []
 
     force = 0.5  # for berry
@@ -80,12 +89,24 @@ def pick_seq(position: list[float]) -> list[JointAction]:
             Action.MOVE,
             position=[position[0], position[1] - APPROACH_OFFSET_Y, position[2]],
             orientation=BERRY_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
         )
     )
-    actions.append(JointAction(Action.MOVE, position=position, orientation=BERRY_ROT))
+    actions.append(
+        JointAction(
+            Action.MOVE,
+            position=position,
+            orientation=BERRY_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
+        )
+    )
 
     # grip
-    # actions.append(JointAction(Action.GRIP, force=force))
+    actions.append(JointAction(Action.GRIP, force=force))
 
     # pull down (-z) and back (-y)
     actions.append(
@@ -93,6 +114,9 @@ def pick_seq(position: list[float]) -> list[JointAction]:
             Action.MOVE,
             position=[position[0], position[1], position[2] - APPROACH_OFFSET_Y],
             orientation=BERRY_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
         )
     )
     actions.append(
@@ -104,27 +128,59 @@ def pick_seq(position: list[float]) -> list[JointAction]:
                 position[2] - APPROACH_OFFSET_Y,
             ],
             orientation=BERRY_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
         )
     )
 
     return actions
 
 
-def drop_seq(position: list[float]) -> list[JointAction]:
+def drop_seq(
+    position: list[float], ms: MoveSolver, cm: CmdMove, executor: ThreadPoolExecutor
+) -> list[JointAction]:
     actions = []
 
     raised_pos = [position[0], position[1], position[2] + 0.15]
     force = 0.0  # release
 
     # approach from raised pos
-    actions.append(JointAction(Action.MOVE, position=raised_pos, orientation=DROP_ROT))
-    actions.append(JointAction(Action.MOVE, position=position, orientation=DROP_ROT))
+    actions.append(
+        JointAction(
+            Action.MOVE,
+            position=raised_pos,
+            orientation=DROP_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
+        )
+    )
+    actions.append(
+        JointAction(
+            Action.MOVE,
+            position=position,
+            orientation=DROP_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
+        )
+    )
 
     # drop
     actions.append(JointAction(Action.GRIP, force=force))
 
     # return to raised pos
-    actions.append(JointAction(Action.MOVE, position=raised_pos, orientation=DROP_ROT))
+    actions.append(
+        JointAction(
+            Action.MOVE,
+            position=raised_pos,
+            orientation=DROP_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
+        )
+    )
 
     return actions
 
@@ -148,11 +204,14 @@ def handle_action(
         else:
             log_str = f"{time.time()},{Action.MOVE},{','.join([str(x) for x in action.position])},{','.join([str(x) for x in action.orientation])},0"
 
-        valid, joints = ms.move(
-            action.position,
-            action.orientation,
-            cm.joint_state or [0, 0, 0, 0, 0, 0],
-        )
+        if action.future is not None:
+            valid, joints = action.future.result()
+        else:
+            valid, joints = ms.move(
+                action.position,
+                action.orientation,
+                cm.joint_state or [0, 0, 0, 0, 0, 0],
+            )
 
         log_str += f",{int(valid)}\n"
         if not valid:
@@ -161,6 +220,8 @@ def handle_action(
 
         # execute the joint action
         cm.dance(joints)
+
+        time.sleep(2)  # delay between motions
     elif action.action == Action.GRIP:  # GRIP action
         node.get_logger().info(f"Setting desired force to {action.force} for {i+1}")
         log_str = f"{time.time()},{Action.GRIP},{','.join(['0']*6)},{action.force},1\n"
@@ -212,6 +273,7 @@ if __name__ == "__main__":
     ms = MoveSolver(node)
     cm = CmdMove(node, ms)
     driver = PNS_Driver(node, ip, port)
+    executor = ThreadPoolExecutor()
 
     # spin required for subscriptions to work
     future = Future()
@@ -222,12 +284,19 @@ if __name__ == "__main__":
 
     time.sleep(1)
 
-    HOME = JointAction(Action.MOVE)
+    HOME = JointAction(Action.MOVE, ms=ms, cm=cm, executor=executor)
 
     actions: list[JointAction] = [
         JointAction(Action.GRIP, force=0),
         # HOME,
-        JointAction(Action.MOVE, position=OBSERVE_LOC, orientation=BERRY_ROT),
+        JointAction(
+            Action.MOVE,
+            position=OBSERVE_LOC,
+            orientation=BERRY_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
+        ),
         JointAction(Action.FIND),
     ]
 
@@ -248,23 +317,15 @@ if __name__ == "__main__":
 
     # BEGIN BERRY SEQUENCE
 
-    # HARDCODE BERRY POSES FOR TESTING
-    # node.poses = [
-    #     BerryPose(id=1, pose=Point(x=0.0, y=0.41, z=0.0)),
-    #     BerryPose(id=2, pose=Point(x=-0.06, y=0.43, z=-0.05)),
-    # ]
-
     # +x: from room to wall
     # +y: away from arm, toward other arm
     # +z: up?
 
     OBSERVE_X_OFFSET = -0.050
     OBSERVE_Y_OFFSET = -0.095
-    OBSERVE_Z_OFFSET = 0.0  # TODO: calibrate
+    OBSERVE_Z_OFFSET = 0.05  # TODO: calibrate
 
     ROTATED_X_OFFSET = -0.040
-    # CLOSE_Y_OFFSET = -0.095
-    # CLOSE_Z_OFFSET = -0.03  # TODO: calibrate
 
     orig_berry_locs = node.poses.copy()
 
@@ -288,7 +349,7 @@ if __name__ == "__main__":
             f"Berry {j+1}: {orig_berry_loc} → {berry_loc} → {move_to_loc}"
         )
 
-        rotated_actions = rotated_seq(move_to_loc)
+        rotated_actions = rotated_seq(move_to_loc, ms, cm, executor)
         for k, action in enumerate(rotated_actions):
             node.get_logger().info(
                 f"Executing close-up action {k+1}/{len(rotated_actions)}"
@@ -318,7 +379,7 @@ if __name__ == "__main__":
             f"Revised Berry {j+1} location: {close_berry_loc} → z: {close_berry_loc[0] + ROTATED_X_OFFSET} → {revised_move_to_loc}"
         )
 
-        pick_actions = pick_seq(revised_move_to_loc)
+        pick_actions = pick_seq(revised_move_to_loc, ms, cm, executor)
 
         for k, action in enumerate(pick_actions):
             node.get_logger().info(f"Executing action {k+1}/{len(pick_actions)}")
@@ -327,23 +388,27 @@ if __name__ == "__main__":
 
             node.get_logger().info(f"Finished action {k+1}/{len(pick_actions)}")
 
-        node.get_logger().info(f"Berry {j+1} is {bcolors.OKCYAN}{driver.fruit_state}{bcolors.ENDC}")
+        node.get_logger().info(
+            f"Berry {j+1} is {bcolors.OKCYAN}{driver.fruit_state}{bcolors.ENDC}"
+        )
 
-        # # only drop if ripe
-        # drop_actions = drop_seq(DROP_LOC) if driver.fruit_state == "ripe" else []
+        # only drop if ripe
+        drop_actions = (
+            drop_seq(DROP_LOC, ms, cm, executor) if driver.fruit_state == "ripe" else []
+        )
 
-        # for k, action in enumerate(drop_actions):
-        #     node.get_logger().info(f"Executing action {k+1}/{len(drop_actions)}")
+        for k, action in enumerate(drop_actions):
+            node.get_logger().info(f"Executing action {k+1}/{len(drop_actions)}")
 
-        #     log_file.write(handle_action(action, ms, cm, ready_client, node))
+            log_file.write(handle_action(action, ms, cm, ready_client, node))
 
-        #     node.get_logger().info(f"Finished action {k+1}/{len(drop_actions)}")
-
+            node.get_logger().info(f"Finished action {k+1}/{len(drop_actions)}")
 
         node.get_logger().info(f"Finished berry {j+1}/{len(orig_berry_locs)}")
 
     # END BERRY SEQUENCE
 
+    executor.shutdown(wait=True)
     log_file.close()
     node.get_logger().info(f"Data saved to data/hybrid_state_{f_idx}.csv")
     driver.stop()

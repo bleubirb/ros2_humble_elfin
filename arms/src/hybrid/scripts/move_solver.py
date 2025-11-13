@@ -2,15 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import os.path
-from dataclasses import dataclass
-from enum import Enum
 
 import matplotlib.pyplot as plt
 import numpy as np
 import sympy as sp
 from scipy.spatial.transform import Rotation
 
-DISABLE_LOGGING = False
+DISABLE_LOGGING = True
 
 
 class bcolors:
@@ -23,36 +21,6 @@ class bcolors:
     ENDC = "\033[0m"
     BOLD = "\033[1m"
     UNDERLINE = "\033[4m"
-
-
-class Action(Enum):
-    MOVE = 0
-    GRIP = 1
-    FIND = 2
-
-
-@dataclass
-class JointAction:
-    action: Action
-
-    # if action == MOVE
-    position: list[float] | None = None
-    orientation: list[float] | None = None
-
-    # if action == GRIP
-    force: float | None = None
-
-    def __post_init__(self):
-        if self.action == Action.MOVE:
-            if (self.position is None or self.orientation is None) and not (
-                self.position is None and self.orientation is None
-            ):
-                raise ValueError(
-                    "Position and orientation must both be None or list[float] for MOVE action."
-                )
-        elif self.action == Action.GRIP:
-            if self.force is None:
-                raise ValueError("Force must be provided for GRIP action.")
 
 
 JOINT_MIN_LIMITS = [-3.14, -2.04, -2.61, -3.14, -2.56, -3.14]

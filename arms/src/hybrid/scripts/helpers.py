@@ -1,6 +1,10 @@
 import os
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from enum import Enum
 
+from cmd_move import CmdMove
+from move_solver import MoveSolver
 from rclpy.node import Node
 
 
@@ -50,3 +54,50 @@ class DataRecorder:
                 f.write(str(bucket))
 
         self.node.get_logger().info(f"Data saved to data/hybrid_gripper_{f_idx}.csv")
+
+
+class Action(Enum):
+    MOVE = 0
+    GRIP = 1
+    FIND = 2
+
+
+@dataclass
+class JointAction:
+    action: Action
+
+    # if action == MOVE
+    position: list[float] | None = None
+    orientation: list[float] | None = None
+
+    # if action == GRIP
+    force: float | None = None
+
+    ms: MoveSolver | None = None
+    cm: CmdMove | None = None
+
+    executor: ThreadPoolExecutor | None = None
+    future: Future | None = None
+
+    def __post_init__(self):
+        if self.action == Action.MOVE:
+            if (self.position is None or self.orientation is None) and not (
+                self.position is None and self.orientation is None
+            ):
+                raise ValueError(
+                    "Position and orientation must both be None or list[float] for MOVE action."
+                )
+
+            if self.ms is None or self.cm is None:
+                return
+
+            self.future = self.executor.submit(
+                self.ms.move,
+                self.position,
+                self.orientation,
+                self.cm.joint_state or [0, 0, 0, 0, 0, 0],
+            )
+
+        elif self.action == Action.GRIP:
+            if self.force is None:
+                raise ValueError("Force must be provided for GRIP action.")

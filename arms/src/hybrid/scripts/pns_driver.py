@@ -195,7 +195,7 @@ class PNS_Driver:
         MIN_HOLD_TIME = 10  # hold for 5 minutes -> testing temperature sensor drift
         MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
 
-        OPEN_WIDTH = 350  # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
+        OPEN_WIDTH = 250  # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
         # OPEN_WIDTH = 670  # only for water bottle experiment
 
@@ -225,9 +225,9 @@ class PNS_Driver:
         # DELTA2 = 0.0
         # DELTA1 = 0.0
 
-        SPEED_FAST = 0.5
-        SPEED_NORMAL = 0.07
-        SPEED_SLOW = 0.005
+        SPEED_FAST = 1.0
+        SPEED_NORMAL = 0.5
+        SPEED_SLOW = 0.1
 
         OPEN_HOLD_TOLERANCE = 5
 
@@ -390,21 +390,21 @@ class PNS_Driver:
                         force_avg <= (desired_force - desired_force * SLOW_FORCE_BOUND)
                     )
                 ):
-                    q = TIGHTEN_FAST
+                    q = TIGHTEN
                 else:
                     # record current width
                     # diameter_approx = state.actual_gripper_width
                     if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (
-                        force_error <= (DELTA1)
+                        force_error <= (desired_force * DELTA1)
                     ):
                         reached_hold_time = time.time()
                         q = HOLD
-                    elif (q == HOLD) and (force_error >= (DELTA2)):
-                        q = TIGHTEN
-                    elif (q == HOLD) and (force_error <= (-1 * DELTA2)):
-                        q = LOOSEN
+                    elif (q == HOLD) and (force_error >= (desired_force * DELTA2)):
+                        q = TIGHTEN_SLOW
+                    elif (q == HOLD) and (force_error <= (desired_force * -1 * DELTA2)):
+                        q = LOOSEN_SLOW
                     elif (q == LOOSEN or q == LOOSEN_SLOW) and (
-                        force_error >= (-1 * DELTA1)
+                        force_error >= (desired_force * -1 * DELTA1)
                     ):
                         reached_hold_time = time.time()
                         q = HOLD
