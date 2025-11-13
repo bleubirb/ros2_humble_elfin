@@ -195,7 +195,7 @@ class PNS_Driver:
         MIN_HOLD_TIME = 10  # hold for 5 minutes -> testing temperature sensor drift
         MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
 
-        OPEN_WIDTH = 400  # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
+        OPEN_WIDTH = 350  # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
         # OPEN_WIDTH = 670  # only for water bottle experiment
 
@@ -214,9 +214,8 @@ class PNS_Driver:
 
         MOVING_AVG_LEN_FORCE = 50
         MOVING_AVG_LEN_PROX = 100
-        MOVING_AVG_LEN_K = 100
 
-        SLOW_FORCE_BOUND = 0.3
+        SLOW_FORCE_BOUND = 0.5
 
         # hysteresis thresholds
         DELTA2 = 0.3
@@ -380,26 +379,19 @@ class PNS_Driver:
                 if abs(width - tmp_width) < OPEN_HOLD_TOLERANCE:
                     reached_hold_time = min(reached_hold_time, time.time())
             else:
-                if (
-                    ProxAvg > FAR
-                    and force_avg
-                    <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2
+                if ProxAvg > FAR and (
+                    force_avg <= (desired_force - desired_force * SLOW_FORCE_BOUND)
                 ):
                     q = TIGHTEN_FAST
-                    contact = False
                 elif (
                     ProxAvg < FAR
                     and ProxAvg > CLOSE
-                    and force_avg
-                    <= desired_force - desired_force * SLOW_FORCE_BOUND - DELTA2
+                    and (
+                        force_avg <= (desired_force - desired_force * SLOW_FORCE_BOUND)
+                    )
                 ):
                     q = TIGHTEN_FAST
-                    contact = False
                 else:
-                    # if contact == False:
-                    #     self.x0 = width
-                    #     self.log(f"Baseline width (x0) set to {self.x0:.2f}")
-                    contact = True
                     # record current width
                     # diameter_approx = state.actual_gripper_width
                     if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (

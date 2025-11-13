@@ -219,13 +219,13 @@ class Vision:
                     resp_body = depth_info.get("response", depth_info)
 
                     overall = resp_body.get("overall", {})
-                    mean_overall = overall.get("mean_z", {})
+                    min_overall = overall.get("min_z", {})
 
-                    # self.node.get_logger().info(f"Mean overall depth: {mean_overall}")
+                    # self.node.get_logger().info(f"min overall depth: {min_overall}")
 
-                    mz_x = float(mean_overall.get("x"))
-                    mz_y = float(mean_overall.get("y"))
-                    mz_z = float(mean_overall.get("z"))
+                    mz_x = float(min_overall.get("x"))
+                    mz_y = float(min_overall.get("y"))
+                    mz_z = float(min_overall.get("z"))
 
                     coords["x"] = mz_x
                     coords["y"] = mz_z  # robot coords
