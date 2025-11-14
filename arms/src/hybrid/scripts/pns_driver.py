@@ -20,7 +20,7 @@ MAX_ERROR_RATIO = 0.5  # reject updates with error > 50% of force
 THRESHOLD_UNRIPE = 0.06
 THRESHOLD_OVERRIPE = 0.015
 MIN_BERRY_WIDTH = 50  # mm, min width to consider for berry
-MAX_BERRY_WIDTH = 200  # mm, max width to consider for berry
+MAX_BERRY_WIDTH = 220  # mm, max width to consider for berry
 MIN_WIDTH_EXIT_LOOPS = 5  # number of loops with width below min to exit force control
 
 
@@ -92,7 +92,7 @@ class PNS_Driver:
         compression = (self.x0 - x) if self.x0 is not None else -x
         # small-contact guard: if measured force is tiny, skip updating to avoid bias
         F_scaled = F / FORCE_SCALE
-        CONTACT_THRESHOLD_N = 0.15
+        CONTACT_THRESHOLD_N = 0.2
         if F_scaled < CONTACT_THRESHOLD_N:
             # not in contact, reset contact counter and skip update
             self.last_t = t

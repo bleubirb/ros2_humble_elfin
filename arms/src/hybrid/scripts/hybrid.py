@@ -26,7 +26,7 @@ DROP_ROT = [-179.5, 0, 0]
 
 OBS_ROT_OFFSET_X = 0.08  # in m
 CLOSEUP_OFFSET_Y = 0.15  # in m
-APPROACH_OFFSET_Y = 0.1  # in m
+APPROACH_OFFSET_Y = 0.05  # in m
 
 
 def closeup_seq(
@@ -322,7 +322,7 @@ if __name__ == "__main__":
     # +z: up?
 
     OBSERVE_X_OFFSET = -0.050
-    OBSERVE_Y_OFFSET = -0.095
+    OBSERVE_Y_OFFSET = -0.085
     OBSERVE_Z_OFFSET = 0.05  # TODO: calibrate
 
     ROTATED_X_OFFSET = -0.040

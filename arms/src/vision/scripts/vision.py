@@ -246,7 +246,7 @@ class Vision:
                 and coords["x"] != 0.0
                 and coords["y"] != 0.0
                 and coords["z"] != 0.0
-                and self.frame_count % 5 == 0
+                and self.frame_count % 4 == 0
             ):
                 berries.append(
                     BerryPose(
@@ -289,7 +289,7 @@ class Vision:
         self.processed_pub.publish(processed_img_msg)
 
         # after 5 frames
-        if self.frame_count % 5 == 0:
+        if self.frame_count % 4 == 0:
             # Publish detected poses
             berries_msg = Berries(berries=berries)
             self.poses_pub.publish(berries_msg)
