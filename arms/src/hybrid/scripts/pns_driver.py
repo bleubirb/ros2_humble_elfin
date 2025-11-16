@@ -40,7 +40,7 @@ class PNS_Driver:
         # self.theta = np.zeros((2, 1))
         self.theta = np.zeros((1, 1))
         self.x0 = None
-        self.initialized = False
+        self.rls_initialized = False
         self.last_t = None
         self.last_x = None
         self.last_F = None
@@ -73,12 +73,12 @@ class PNS_Driver:
         self.thread.join()
 
     def update_rls(self, t, x, F):
-        if not self.initialized:
+        if not self.rls_initialized:
             self.last_t = t
             self.last_x = x
             self.last_F = F
 
-            self.initialized = True
+            self.rls_initialized = True
             # return None, None, None, None
             return None, None, None
 
@@ -192,10 +192,10 @@ class PNS_Driver:
         desired_force = 0
         last_prox = 1000
 
-        MIN_HOLD_TIME = 10  # hold for 5 minutes -> testing temperature sensor drift
-        MAX_GRIP_TIME = 300  # seconds -> adjust for altering data collection amount
+        MIN_CLASSIFICATION_TIME = 20.0  # seconds, min time to wait after classification change before accepting
+        # MAX_CLASSIFICATION_TIME = 30.0  # seconds, max time to wait for any classification before exiting force control
 
-        OPEN_WIDTH = 250  # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
+        OPEN_WIDTH = 350  # mm; max opening width -> if smaller than 300 mm diameter, change open width to 400 mm
 
         # OPEN_WIDTH = 670  # only for water bottle experiment
 
@@ -238,7 +238,7 @@ class PNS_Driver:
 
         last_target = 0
 
-        reached_hold_time = float("inf")
+        reached_class_time = float("inf")
         start_time = float("inf")
 
         CALIBRATION_TIME = 5  # seconds
@@ -248,14 +248,16 @@ class PNS_Driver:
         r_force_bias = 0.0
         l_force_drift = 0.0  # per loop increment
         r_force_drift = 0.0  # per loop increment
-        # baseline_loop_counter = 0  # loop index at last calibration/rebaseline
 
         min_width_exit_counter = 0
 
         tmp_width = 0
 
-        loop_counter = 0
         while rclpy.ok() and not self.shutdown:
+            if self.done:
+                time.sleep(PERIOD)
+                continue
+
             loop_start_time = time.time()
             state = self.gripper.readState()
 
@@ -263,9 +265,10 @@ class PNS_Driver:
 
             if self.fd != desired_force:
                 desired_force = self.fd
-                reached_hold_time = float("inf")
+                reached_class_time = float("inf")
                 start_time = time.time()
                 self.fruit_state = "unclassified"
+                self.rls_initialized = False
 
             bucket.fd = desired_force
 
@@ -287,9 +290,6 @@ class PNS_Driver:
             ProxR = mean(prox_r_range)
             width = mean(width_range)
             bucket.width = width
-
-            # if cmd.target_width == 0:
-            #     cmd.target_width = int(max(0, min(65535, round(width))))
 
             ProxAvg = (
                 ProxL + ProxR
@@ -316,7 +316,7 @@ class PNS_Driver:
 
                 # mark move state in program state data
                 q = MOVE
-                reached_hold_time = float("inf")
+                reached_class_time = float("inf")
                 force_range = []
 
                 delay_start_time = time.time()
@@ -333,7 +333,6 @@ class PNS_Driver:
                     self.data.record(tmp_bucket)
 
                     time.sleep(PERIOD)
-                    loop_counter += 1
 
                 # time.sleep(5)
                 # desired_force = 1.5
@@ -352,17 +351,6 @@ class PNS_Driver:
             bucket.raw_fz_l = l_force_raw
             bucket.raw_fz_r = r_force_raw
 
-            # if calibrated and self.enable_drift_comp:
-            #     loops_since_baseline = max(0, loop_counter - baseline_loop_counter)
-            #     l_force = l_force_raw - l_force_bias - l_force_drift * loops_since_baseline
-            #     r_force = r_force_raw - r_force_bias - r_force_drift * loops_since_baseline
-            # else:
-            #     l_force = l_force_raw
-            #     r_force = r_force_raw
-
-            l_force = l_force_raw - l_force_bias - l_force_drift * loop_counter
-            r_force = r_force_raw - r_force_bias - r_force_drift * loop_counter
-
             force = (l_force_raw + r_force_raw) / 2 / 10
 
             force_range.append(force)
@@ -376,8 +364,6 @@ class PNS_Driver:
             if desired_force == 0:
                 tmp_width = OPEN_WIDTH
                 q = HOLD
-                if abs(width - tmp_width) < OPEN_HOLD_TOLERANCE:
-                    reached_hold_time = min(reached_hold_time, time.time())
             else:
                 if ProxAvg > FAR and (
                     force_avg <= (desired_force - desired_force * SLOW_FORCE_BOUND)
@@ -397,7 +383,6 @@ class PNS_Driver:
                     if (q == TIGHTEN or q == TIGHTEN_SLOW or q == TIGHTEN_FAST) and (
                         force_error <= (desired_force * DELTA1)
                     ):
-                        reached_hold_time = time.time()
                         q = HOLD
                     elif (q == HOLD) and (force_error >= (desired_force * DELTA2)):
                         q = TIGHTEN_SLOW
@@ -406,16 +391,25 @@ class PNS_Driver:
                     elif (q == LOOSEN or q == LOOSEN_SLOW) and (
                         force_error >= (desired_force * -1 * DELTA1)
                     ):
-                        reached_hold_time = time.time()
                         q = HOLD
 
                     # for parameter estimation of spring constant (remove if no estimation)
                     if width < MAX_BERRY_WIDTH:
-                        # [k, _, F_pred, error] = self.update_rls(time.time(), width, force_avg)
                         [k, F_pred, error] = self.update_rls(
                             time.time(), width, force_avg
                         )
-                        self.fruit_state = self.classify(k)
+
+                        # if classification is changed, reset timer
+                        new_fruit_state = self.classify(k)
+                        if new_fruit_state != self.fruit_state:
+                            if new_fruit_state in ["unripe", "ripe", "overripe"]:
+                                self.log(
+                                    f"Fruit classification changed from {self.fruit_state} to {new_fruit_state}"
+                                )
+                                reached_class_time = time.time()
+                            
+                            self.fruit_state = new_fruit_state
+
                         bucket.k = k
                         bucket.F_pred = F_pred
                         bucket.rls_error = error
@@ -437,9 +431,6 @@ class PNS_Driver:
                         min_width_exit_counter = 0
 
                 bucket.state = q
-
-                if q != HOLD:
-                    reached_hold_time = float("inf")
 
                 if q == HOLD:
                     pass
@@ -464,14 +455,13 @@ class PNS_Driver:
                 )
 
             bucket.hold_time = (
-                reached_hold_time if reached_hold_time != float("inf") else 0
+                reached_class_time if reached_class_time != float("inf") else 0
             )
 
             if calibrated:
                 self.data.record(bucket)
 
             cmd.target_width = int(round(tmp_width))
-            # cmd.target_force = int(round(cmd.target_force))
 
             if (desired_force == 0 and not self.done) or cmd.target_width != int(
                 round(last_target)
@@ -507,20 +497,11 @@ class PNS_Driver:
                     r_force_drift = (mean(f_r_arr) - r_force_bias) / (
                         (CALIBRATION_TIME + PERIOD * MOVING_AVG_LEN_FORCE) * LOOP_FREQ
                     )
-                    # baseline_loop_counter = loop_counter
                     self.log(
                         f"Force calibration complete! l_force_drift: {l_force_drift:.6f} per loop, r_force_drift: {r_force_drift:.6f} per loop\n Bias left: {l_force_bias:.6f}, Bias right: {r_force_bias:.6f}\n"
                     )
                     calibrated = True
                     # set baseline open width for compression calculation
-
-            # if self.enable_drift_comp and self.enable_online_rebaselining:
-            #     no_contact = desired_force == 0 and (ProxAvg > FAR or cmd.target_width >= OPEN_WIDTH - OPEN_HOLD_TOLERANCE)
-            #     if no_contact and calibrated:
-            #         alpha = max(0.0, min(1.0, self.rebaselining_alpha))
-            #         l_force_bias = (1 - alpha) * l_force_bias + alpha * l_force_raw
-            #         r_force_bias = (1 - alpha) * r_force_bias + alpha * r_force_raw
-            #         baseline_loop_counter = loop_counter
 
             last_target = tmp_width
 
@@ -528,8 +509,8 @@ class PNS_Driver:
                 not self.done
                 and desired_force == self.fd
                 and (
-                    time.time() - reached_hold_time > MIN_HOLD_TIME
-                    or time.time() - start_time > MAX_GRIP_TIME
+                    time.time() - reached_class_time > MIN_CLASSIFICATION_TIME
+                    # or time.time() - start_time > MAX_CLASSIFICATION_TIME
                     or desired_force == 0
                 )
             ) or (min_width_exit_counter >= MIN_WIDTH_EXIT_LOOPS):
@@ -559,6 +540,5 @@ class PNS_Driver:
             if duration < PERIOD:
                 time.sleep(PERIOD - duration)
 
-            loop_counter += 1
 
         self.data.save()
