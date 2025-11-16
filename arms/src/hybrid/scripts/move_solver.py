@@ -8,7 +8,7 @@ import numpy as np
 import sympy as sp
 from scipy.spatial.transform import Rotation
 
-DISABLE_LOGGING = True
+DISABLE_LOGGING = False
 
 
 class bcolors:
@@ -244,6 +244,35 @@ class MoveSolver:
                 else:
                     self.log("Unknown error")
                     return False, drag_joints
+
+        if (
+            drag_joints[5] > 0
+            and (JOINT_MAX_LIMITS[5] - drag_joints[5] < drag_joints[5])
+        ) or (
+            drag_joints[5] < 0
+            and (drag_joints[5] - JOINT_MIN_LIMITS[5] < -drag_joints[5])
+        ):
+            self.log("Joint 6 is closer to limits than to 0, trying to invert")
+            _, inverted_joints = self.compute(
+                target_pose,
+                target_orientation,
+                [
+                    drag_joints[0],
+                    drag_joints[1],
+                    drag_joints[2],
+                    drag_joints[3] - np.pi,
+                    -drag_joints[4],
+                    np.pi - drag_joints[5],
+                ],
+                retry=True,
+            )
+
+            valid, inverted_joints = self.check_pose(
+                inverted_joints, target_pose, target_orientation, retry=True
+            )
+
+            if valid:
+                return True, inverted_joints
 
         return True, drag_joints
 

@@ -16,7 +16,7 @@ from pns_driver import PNS_Driver
 from vision_msgs.msg import Berries
 from vision_msgs.srv import Ready
 
-OBSERVE_LOC = [0.053, 0.500, 0.400]  # in m
+OBSERVE_LOC = [0.156, 0.221, 0.326]  # in m
 DROP_LOC = [-0.300, 0.00, 0.200]
 
 # gripper is rotated 22 deg wrt horizontal when picking berries
@@ -273,7 +273,7 @@ if __name__ == "__main__":
     ms = MoveSolver(node)
     cm = CmdMove(node, ms)
     driver = PNS_Driver(node, ip, port)
-    executor = ThreadPoolExecutor()
+    executor = ThreadPoolExecutor(max_workers=5)
 
     # spin required for subscriptions to work
     future = Future()
@@ -285,18 +285,20 @@ if __name__ == "__main__":
     time.sleep(1)
 
     HOME = JointAction(Action.MOVE, ms=ms, cm=cm, executor=executor)
-
-    actions: list[JointAction] = [
-        JointAction(Action.GRIP, force=0),
-        # HOME,
-        JointAction(
+    DROP_SEQ = drop_seq(DROP_LOC, ms, cm, executor)
+    OBSERVE_ACT = JointAction(
             Action.MOVE,
             position=OBSERVE_LOC,
             orientation=BERRY_ROT,
             ms=ms,
             cm=cm,
             executor=executor,
-        ),
+        )
+
+    actions: list[JointAction] = [
+        JointAction(Action.GRIP, force=0),
+        # HOME,
+        OBSERVE_ACT,
         JointAction(Action.FIND),
     ]
 
@@ -322,14 +324,14 @@ if __name__ == "__main__":
     # +z: up?
 
     OBSERVE_X_OFFSET = -0.050
-    OBSERVE_Y_OFFSET = -0.085
-    OBSERVE_Z_OFFSET = 0.05  # TODO: calibrate
+    OBSERVE_Y_OFFSET = -0.095
+    OBSERVE_Z_OFFSET = 0.08  # TODO: calibrate
 
     ROTATED_X_OFFSET = -0.040
 
     orig_berry_locs = node.poses.copy()
 
-    for j, berry in enumerate(orig_berry_locs[:1]):  # TODO: change back to all berries
+    for j, berry in enumerate(orig_berry_locs):  # TODO: change back to all berries
         orig_berry_loc = [
             berry.pose.x,
             berry.pose.y,
@@ -343,7 +345,7 @@ if __name__ == "__main__":
         move_to_loc = [
             OBSERVE_LOC[0] + berry_loc[0],
             OBSERVE_LOC[1] + berry_loc[1],
-            OBSERVE_LOC[2] + berry_loc[2],
+            OBSERVE_LOC[2] + OBSERVE_Z_OFFSET,
         ]
         node.get_logger().info(
             f"Berry {j+1}: {orig_berry_loc} → {berry_loc} → {move_to_loc}"
@@ -365,11 +367,14 @@ if __name__ == "__main__":
             node.get_logger().error("No berry poses found during close-up!")
             continue
 
+        _pose = min(node.poses, key=lambda p: abs(p.pose.z))
+        
         close_berry_loc = [
-            node.poses[0].pose.x,
-            node.poses[0].pose.y,
-            node.poses[0].pose.z,
+            _pose.pose.x,
+            _pose.pose.y,
+            _pose.pose.z,
         ]
+
         revised_move_to_loc = [
             move_to_loc[0],
             move_to_loc[1],
@@ -394,7 +399,7 @@ if __name__ == "__main__":
 
         # only drop if ripe
         drop_actions = (
-            drop_seq(DROP_LOC, ms, cm, executor) if driver.fruit_state == "ripe" else []
+            DROP_SEQ if driver.fruit_state == "ripe" else []
         )
 
         for k, action in enumerate(drop_actions):
@@ -405,6 +410,9 @@ if __name__ == "__main__":
             node.get_logger().info(f"Finished action {k+1}/{len(drop_actions)}")
 
         node.get_logger().info(f"Finished berry {j+1}/{len(orig_berry_locs)}")
+
+        if j < len(orig_berry_locs) - 1:
+            log_file.write(handle_action(OBSERVE_ACT, ms, cm, ready_client, node))
 
     # END BERRY SEQUENCE
 
