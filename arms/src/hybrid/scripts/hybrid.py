@@ -4,19 +4,18 @@
 import os
 import threading
 import time
-from asyncio import Future
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import rclpy
 from cmd_move import CmdMove
 from helpers import Action, JointAction
-from move_solver import MoveSolver, bcolors
+from move_solver import MoveSolver
 from pns_driver import PNS_Driver
 
 from vision_msgs.msg import Berries
 from vision_msgs.srv import Ready
 
-OBSERVE_LOC = [0.156, 0.221, 0.326]  # in m
+# OBSERVE_LOC = [0.156, 0.221, 0.326]  # in m
 DROP_LOC = [-0.300, 0.00, 0.200]
 
 # gripper is rotated 22 deg wrt horizontal when picking berries
@@ -27,27 +26,6 @@ DROP_ROT = [-179.5, 0, 0]
 OBS_ROT_OFFSET_X = 0.08  # in m
 CLOSEUP_OFFSET_Y = 0.15  # in m
 APPROACH_OFFSET_Y = 0.05  # in m
-
-
-def closeup_seq(
-    position: list[float], ms: MoveSolver, cm: CmdMove, executor: ThreadPoolExecutor
-) -> list[JointAction]:
-    actions = []
-
-    # close-up view (-y, -z)
-    actions.append(
-        JointAction(
-            Action.MOVE,
-            position=[position[0], position[1] - CLOSEUP_OFFSET_Y, position[2]],
-            orientation=BERRY_ROT,
-            ms=ms,
-            cm=cm,
-            executor=executor,
-        )
-    )
-    actions.append(JointAction(Action.FIND))
-
-    return actions
 
 
 def rotated_seq(
@@ -106,7 +84,7 @@ def pick_seq(
     )
 
     # grip
-    actions.append(JointAction(Action.GRIP, force=force))
+    # actions.append(JointAction(Action.GRIP, force=force))
 
     # pull down (-z) and back (-y)
     actions.append(
@@ -189,6 +167,7 @@ def handle_action(
     action: JointAction,
     ms: MoveSolver,
     cm: CmdMove,
+    driver: PNS_Driver,
     ready_client: rclpy.client.Client,
     node: rclpy.node.Node,
 ) -> str:
@@ -284,24 +263,6 @@ if __name__ == "__main__":
 
     time.sleep(1)
 
-    HOME = JointAction(Action.MOVE, ms=ms, cm=cm, executor=executor)
-    # DROP_SEQ = drop_seq(DROP_LOC, ms, cm, executor)
-    # OBSERVE_ACT = JointAction(
-    #         Action.MOVE,
-    #         position=OBSERVE_LOC,
-    #         orientation=BERRY_ROT,
-    #         ms=ms,
-    #         cm=cm,
-    #         executor=executor,
-    #     )
-
-    actions: list[JointAction] = [
-        JointAction(Action.GRIP, force=0.8),
-        # HOME,
-        # OBSERVE_ACT,
-        # JointAction(Action.FIND),
-    ]
-
     if not os.path.exists("data"):
         os.makedirs("data")
     f_idx = 0
@@ -310,120 +271,137 @@ if __name__ == "__main__":
     log_file = open(f"data/hybrid_state_{f_idx}.csv", "w")
     log_file.write("Time,State,X,Y,Z,RX,RY,RZ,F,Valid\n")
 
-    for i, action in enumerate(actions):
-        node.get_logger().info(f"Executing action {i+1}/{len(actions)}")
+    estimated_data = []
 
-        log_file.write(handle_action(action, ms, cm, ready_client, node))
+    observe_locs = [
+        [0.205, 0.2, 0.49],
+        [0.156, 0.221, 0.326],  # hardcode more positions here
+        # [-0.023, 0.127, 0.387],
+        [0.219, 0.299, 0.459],
+        [0.217, 0.328, 0.393],
+        [0.310, 0.312, 0.411]
+    ]
 
-        node.get_logger().info(f"Finished action {i+1}/{len(actions)}")
+    for observe_loc in observe_locs:
+        node.get_logger().info(f"Using observe location: {observe_loc}")
 
-    # # BEGIN BERRY SEQUENCE
+        observe_act = JointAction(
+            Action.MOVE,
+            position=observe_loc,
+            orientation=BERRY_ROT,
+            ms=ms,
+            cm=cm,
+            executor=executor,
+        )
 
-    # # +x: from room to wall
-    # # +y: away from arm, toward other arm
-    # # +z: up?
+        actions: list[JointAction] = [
+            JointAction(Action.GRIP, force=0),
+            observe_act,
+            JointAction(Action.FIND),
+        ]
 
-    # OBSERVE_X_OFFSET = -0.050
-    # OBSERVE_Y_OFFSET = -0.095
-    # OBSERVE_Z_OFFSET = 0.08  # TODO: calibrate
+        for i, action in enumerate(actions):
+            node.get_logger().info(f"Executing action {i+1}/{len(actions)}")
 
-    # ROTATED_X_OFFSET = -0.040
+            log_file.write(handle_action(action, ms, cm, driver, ready_client, node))
 
-    # orig_berry_locs = node.poses.copy()
+            node.get_logger().info(f"Finished action {i+1}/{len(actions)}")
 
-    # for j, berry in enumerate(orig_berry_locs):  # TODO: change back to all berries
-    #     orig_berry_loc = [
-    #         berry.pose.x,
-    #         berry.pose.y,
-    #         berry.pose.z,
-    #     ]
-    #     berry_loc = [
-    #         orig_berry_loc[0] + OBSERVE_X_OFFSET,
-    #         orig_berry_loc[1] + OBSERVE_Y_OFFSET,
-    #         orig_berry_loc[2] + OBSERVE_Z_OFFSET,
-    #     ]
-    #     move_to_loc = [
-    #         OBSERVE_LOC[0] + berry_loc[0],
-    #         OBSERVE_LOC[1] + berry_loc[1],
-    #         OBSERVE_LOC[2] + OBSERVE_Z_OFFSET,
-    #     ]
-    #     node.get_logger().info(
-    #         f"Berry {j+1}: {orig_berry_loc} → {berry_loc} → {move_to_loc}"
-    #     )
+        # BEGIN BERRY SEQUENCE
 
-    #     rotated_actions = rotated_seq(move_to_loc, ms, cm, executor)
-    #     for k, action in enumerate(rotated_actions):
-    #         node.get_logger().info(
-    #             f"Executing close-up action {k+1}/{len(rotated_actions)}"
-    #         )
+        # +x: from room to wall
+        # +y: away from arm, toward other arm
+        # +z: up?
 
-    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
+        OBSERVE_X_OFFSET = -0.050
+        OBSERVE_Y_OFFSET = -0.095
+        OBSERVE_Z_OFFSET = 0.08  # TODO: calibrate
 
-    #         node.get_logger().info(
-    #             f"Finished close-up action {k+1}/{len(rotated_actions)}"
-    #         )
+        ROTATED_X_OFFSET = -0.040
 
-    #     if not node.poses:
-    #         node.get_logger().error("No berry poses found during close-up!")
-    #         continue
+        orig_berry_locs = node.poses.copy()
 
-    #     _pose = min(node.poses, key=lambda p: abs(p.pose.z))
-        
-    #     close_berry_loc = [
-    #         _pose.pose.x,
-    #         _pose.pose.y,
-    #         _pose.pose.z,
-    #     ]
+        move_to_loc = None
+        revised_move_to_loc = None
 
-    #     revised_move_to_loc = [
-    #         move_to_loc[0],
-    #         move_to_loc[1],
-    #         move_to_loc[2] + close_berry_loc[0] + ROTATED_X_OFFSET,
-    #     ]
-    #     node.get_logger().info(
-    #         f"Revised Berry {j+1} location: {close_berry_loc} → z: {close_berry_loc[0] + ROTATED_X_OFFSET} → {revised_move_to_loc}"
-    #     )
+        for j, berry in enumerate(orig_berry_locs):
+            orig_berry_loc = [
+                berry.pose.x,
+                berry.pose.y,
+                berry.pose.z,
+            ]
+            berry_loc = [
+                orig_berry_loc[0] + OBSERVE_X_OFFSET,
+                orig_berry_loc[1] + OBSERVE_Y_OFFSET,
+                orig_berry_loc[2] + OBSERVE_Z_OFFSET,
+            ]
+            move_to_loc = [
+                observe_loc[0] + berry_loc[0],
+                observe_loc[1] + berry_loc[1],
+                observe_loc[2] + OBSERVE_Z_OFFSET,
+            ]
+            node.get_logger().info(
+                f"Berry {j+1}: {orig_berry_loc} → {berry_loc} → {move_to_loc}"
+            )
 
-    #     pick_actions = pick_seq(revised_move_to_loc, ms, cm, executor)
+            rotated_actions = rotated_seq(move_to_loc, ms, cm, executor)
+            for k, action in enumerate(rotated_actions):
+                node.get_logger().info(
+                    f"Executing close-up action {k+1}/{len(rotated_actions)}"
+                )
 
-    #     for k, action in enumerate(pick_actions):
-    #         node.get_logger().info(f"Executing action {k+1}/{len(pick_actions)}")
+                log_file.write(
+                    handle_action(action, ms, cm, driver, ready_client, node)
+                )
 
-    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
+                node.get_logger().info(
+                    f"Finished close-up action {k+1}/{len(rotated_actions)}"
+                )
 
-    #         node.get_logger().info(f"Finished action {k+1}/{len(pick_actions)}")
+            if not node.poses:
+                node.get_logger().error("No berry poses found during close-up!")
+                continue
 
-    #     node.get_logger().info(
-    #         f"Berry {j+1} is {bcolors.OKCYAN}{driver.fruit_state}{bcolors.ENDC}"
-    #     )
+            _pose = min(node.poses, key=lambda p: abs(p.pose.z))
 
-    #     # only drop if ripe
-    #     drop_actions = (
-    #         DROP_SEQ if driver.fruit_state == "ripe" else []
-    #     )
+            close_berry_loc = [
+                _pose.pose.x,
+                _pose.pose.y,
+                _pose.pose.z,
+            ]
 
-    #     for k, action in enumerate(drop_actions):
-    #         node.get_logger().info(f"Executing action {k+1}/{len(drop_actions)}")
+            revised_move_to_loc = [
+                move_to_loc[0],
+                move_to_loc[1],
+                move_to_loc[2] + close_berry_loc[0] + ROTATED_X_OFFSET,
+            ]
+            node.get_logger().info(
+                f"Revised Berry {j+1} location: {close_berry_loc} → z: {close_berry_loc[0] + ROTATED_X_OFFSET} → {revised_move_to_loc}"
+            )
 
-    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
+        if move_to_loc is not None and revised_move_to_loc is not None:
+            estimated_data.append((observe_loc, move_to_loc, revised_move_to_loc))
 
-    #         node.get_logger().info(f"Finished action {k+1}/{len(drop_actions)}")
+    est_file = open(f"data/hybrid_estimated_{f_idx}.csv", "w")
+    est_file.write(
+        "Observe_X,Observe_Y,Observe_Z,Est_X,Est_Y,Est_Z,Rev_X,Rev_Y,Rev_Z\n"
+    )
+    for data in estimated_data:
+        observe_loc, est_loc, rev_loc = data
+        est_file.write(
+            f"{observe_loc[0]},{observe_loc[1]},{observe_loc[2]},"
+            f"{est_loc[0]},{est_loc[1]},{est_loc[2]},"
+            f"{rev_loc[0]},{rev_loc[1]},{rev_loc[2]}\n"
+        )
+    est_file.close()
 
-    #     node.get_logger().info(f"Finished berry {j+1}/{len(orig_berry_locs)}")
-
-    #     if j < len(orig_berry_locs) - 1:
-    #         log_file.write(handle_action(OBSERVE_ACT, ms, cm, ready_client, node))
-
-    # # END BERRY SEQUENCE
+    # END BERRY SEQUENCE
 
     executor.shutdown(wait=True)
     log_file.close()
     node.get_logger().info(f"Data saved to data/hybrid_state_{f_idx}.csv")
     driver.stop()
     node.get_logger().info("It worked!\n")
-
-    # while True:
-    #     time.sleep(1)
 
     # cleanup
     future.set_result(True)
