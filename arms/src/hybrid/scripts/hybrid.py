@@ -285,21 +285,21 @@ if __name__ == "__main__":
     time.sleep(1)
 
     HOME = JointAction(Action.MOVE, ms=ms, cm=cm, executor=executor)
-    DROP_SEQ = drop_seq(DROP_LOC, ms, cm, executor)
-    OBSERVE_ACT = JointAction(
-            Action.MOVE,
-            position=OBSERVE_LOC,
-            orientation=BERRY_ROT,
-            ms=ms,
-            cm=cm,
-            executor=executor,
-        )
+    # DROP_SEQ = drop_seq(DROP_LOC, ms, cm, executor)
+    # OBSERVE_ACT = JointAction(
+    #         Action.MOVE,
+    #         position=OBSERVE_LOC,
+    #         orientation=BERRY_ROT,
+    #         ms=ms,
+    #         cm=cm,
+    #         executor=executor,
+    #     )
 
     actions: list[JointAction] = [
-        JointAction(Action.GRIP, force=0),
+        JointAction(Action.GRIP, force=0.8),
         # HOME,
-        OBSERVE_ACT,
-        JointAction(Action.FIND),
+        # OBSERVE_ACT,
+        # JointAction(Action.FIND),
     ]
 
     if not os.path.exists("data"):
@@ -317,104 +317,104 @@ if __name__ == "__main__":
 
         node.get_logger().info(f"Finished action {i+1}/{len(actions)}")
 
-    # BEGIN BERRY SEQUENCE
+    # # BEGIN BERRY SEQUENCE
 
-    # +x: from room to wall
-    # +y: away from arm, toward other arm
-    # +z: up?
+    # # +x: from room to wall
+    # # +y: away from arm, toward other arm
+    # # +z: up?
 
-    OBSERVE_X_OFFSET = -0.050
-    OBSERVE_Y_OFFSET = -0.095
-    OBSERVE_Z_OFFSET = 0.08  # TODO: calibrate
+    # OBSERVE_X_OFFSET = -0.050
+    # OBSERVE_Y_OFFSET = -0.095
+    # OBSERVE_Z_OFFSET = 0.08  # TODO: calibrate
 
-    ROTATED_X_OFFSET = -0.040
+    # ROTATED_X_OFFSET = -0.040
 
-    orig_berry_locs = node.poses.copy()
+    # orig_berry_locs = node.poses.copy()
 
-    for j, berry in enumerate(orig_berry_locs):  # TODO: change back to all berries
-        orig_berry_loc = [
-            berry.pose.x,
-            berry.pose.y,
-            berry.pose.z,
-        ]
-        berry_loc = [
-            orig_berry_loc[0] + OBSERVE_X_OFFSET,
-            orig_berry_loc[1] + OBSERVE_Y_OFFSET,
-            orig_berry_loc[2] + OBSERVE_Z_OFFSET,
-        ]
-        move_to_loc = [
-            OBSERVE_LOC[0] + berry_loc[0],
-            OBSERVE_LOC[1] + berry_loc[1],
-            OBSERVE_LOC[2] + OBSERVE_Z_OFFSET,
-        ]
-        node.get_logger().info(
-            f"Berry {j+1}: {orig_berry_loc} → {berry_loc} → {move_to_loc}"
-        )
+    # for j, berry in enumerate(orig_berry_locs):  # TODO: change back to all berries
+    #     orig_berry_loc = [
+    #         berry.pose.x,
+    #         berry.pose.y,
+    #         berry.pose.z,
+    #     ]
+    #     berry_loc = [
+    #         orig_berry_loc[0] + OBSERVE_X_OFFSET,
+    #         orig_berry_loc[1] + OBSERVE_Y_OFFSET,
+    #         orig_berry_loc[2] + OBSERVE_Z_OFFSET,
+    #     ]
+    #     move_to_loc = [
+    #         OBSERVE_LOC[0] + berry_loc[0],
+    #         OBSERVE_LOC[1] + berry_loc[1],
+    #         OBSERVE_LOC[2] + OBSERVE_Z_OFFSET,
+    #     ]
+    #     node.get_logger().info(
+    #         f"Berry {j+1}: {orig_berry_loc} → {berry_loc} → {move_to_loc}"
+    #     )
 
-        rotated_actions = rotated_seq(move_to_loc, ms, cm, executor)
-        for k, action in enumerate(rotated_actions):
-            node.get_logger().info(
-                f"Executing close-up action {k+1}/{len(rotated_actions)}"
-            )
+    #     rotated_actions = rotated_seq(move_to_loc, ms, cm, executor)
+    #     for k, action in enumerate(rotated_actions):
+    #         node.get_logger().info(
+    #             f"Executing close-up action {k+1}/{len(rotated_actions)}"
+    #         )
 
-            log_file.write(handle_action(action, ms, cm, ready_client, node))
+    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
 
-            node.get_logger().info(
-                f"Finished close-up action {k+1}/{len(rotated_actions)}"
-            )
+    #         node.get_logger().info(
+    #             f"Finished close-up action {k+1}/{len(rotated_actions)}"
+    #         )
 
-        if not node.poses:
-            node.get_logger().error("No berry poses found during close-up!")
-            continue
+    #     if not node.poses:
+    #         node.get_logger().error("No berry poses found during close-up!")
+    #         continue
 
-        _pose = min(node.poses, key=lambda p: abs(p.pose.z))
+    #     _pose = min(node.poses, key=lambda p: abs(p.pose.z))
         
-        close_berry_loc = [
-            _pose.pose.x,
-            _pose.pose.y,
-            _pose.pose.z,
-        ]
+    #     close_berry_loc = [
+    #         _pose.pose.x,
+    #         _pose.pose.y,
+    #         _pose.pose.z,
+    #     ]
 
-        revised_move_to_loc = [
-            move_to_loc[0],
-            move_to_loc[1],
-            move_to_loc[2] + close_berry_loc[0] + ROTATED_X_OFFSET,
-        ]
-        node.get_logger().info(
-            f"Revised Berry {j+1} location: {close_berry_loc} → z: {close_berry_loc[0] + ROTATED_X_OFFSET} → {revised_move_to_loc}"
-        )
+    #     revised_move_to_loc = [
+    #         move_to_loc[0],
+    #         move_to_loc[1],
+    #         move_to_loc[2] + close_berry_loc[0] + ROTATED_X_OFFSET,
+    #     ]
+    #     node.get_logger().info(
+    #         f"Revised Berry {j+1} location: {close_berry_loc} → z: {close_berry_loc[0] + ROTATED_X_OFFSET} → {revised_move_to_loc}"
+    #     )
 
-        pick_actions = pick_seq(revised_move_to_loc, ms, cm, executor)
+    #     pick_actions = pick_seq(revised_move_to_loc, ms, cm, executor)
 
-        for k, action in enumerate(pick_actions):
-            node.get_logger().info(f"Executing action {k+1}/{len(pick_actions)}")
+    #     for k, action in enumerate(pick_actions):
+    #         node.get_logger().info(f"Executing action {k+1}/{len(pick_actions)}")
 
-            log_file.write(handle_action(action, ms, cm, ready_client, node))
+    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
 
-            node.get_logger().info(f"Finished action {k+1}/{len(pick_actions)}")
+    #         node.get_logger().info(f"Finished action {k+1}/{len(pick_actions)}")
 
-        node.get_logger().info(
-            f"Berry {j+1} is {bcolors.OKCYAN}{driver.fruit_state}{bcolors.ENDC}"
-        )
+    #     node.get_logger().info(
+    #         f"Berry {j+1} is {bcolors.OKCYAN}{driver.fruit_state}{bcolors.ENDC}"
+    #     )
 
-        # only drop if ripe
-        drop_actions = (
-            DROP_SEQ if driver.fruit_state == "ripe" else []
-        )
+    #     # only drop if ripe
+    #     drop_actions = (
+    #         DROP_SEQ if driver.fruit_state == "ripe" else []
+    #     )
 
-        for k, action in enumerate(drop_actions):
-            node.get_logger().info(f"Executing action {k+1}/{len(drop_actions)}")
+    #     for k, action in enumerate(drop_actions):
+    #         node.get_logger().info(f"Executing action {k+1}/{len(drop_actions)}")
 
-            log_file.write(handle_action(action, ms, cm, ready_client, node))
+    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
 
-            node.get_logger().info(f"Finished action {k+1}/{len(drop_actions)}")
+    #         node.get_logger().info(f"Finished action {k+1}/{len(drop_actions)}")
 
-        node.get_logger().info(f"Finished berry {j+1}/{len(orig_berry_locs)}")
+    #     node.get_logger().info(f"Finished berry {j+1}/{len(orig_berry_locs)}")
 
-        if j < len(orig_berry_locs) - 1:
-            log_file.write(handle_action(OBSERVE_ACT, ms, cm, ready_client, node))
+    #     if j < len(orig_berry_locs) - 1:
+    #         log_file.write(handle_action(OBSERVE_ACT, ms, cm, ready_client, node))
 
-    # END BERRY SEQUENCE
+    # # END BERRY SEQUENCE
 
     executor.shutdown(wait=True)
     log_file.close()
