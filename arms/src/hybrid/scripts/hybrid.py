@@ -4,13 +4,12 @@
 import os
 import threading
 import time
-from asyncio import Future
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import rclpy
 from cmd_move import CmdMove
 from helpers import Action, JointAction
-from move_solver import MoveSolver, bcolors
+from move_solver import MoveSolver
 from pns_driver import PNS_Driver
 
 from vision_msgs.msg import Berries
@@ -20,9 +19,9 @@ OBSERVE_LOC = [0.156, 0.221, 0.326]  # in m
 DROP_LOC = [-0.300, 0.00, 0.200]
 
 # gripper is rotated 22 deg wrt horizontal when picking berries
-BERRY_ROT = [-90, 68, 0]  # in degrees
-BERRY_OBS_ROT = [-90, -18, 0]
-DROP_ROT = [-179.5, 0, 0]
+BERRY_ROT = [-90.0, 68.0, 0.0]  # in degrees
+BERRY_OBS_ROT = [-90.0, -18.0, 0.0]
+DROP_ROT = [-179.5, 0.0, 0.0]
 
 OBS_ROT_OFFSET_X = 0.08  # in m
 CLOSEUP_OFFSET_Y = 0.15  # in m
@@ -189,6 +188,7 @@ def handle_action(
     action: JointAction,
     ms: MoveSolver,
     cm: CmdMove,
+    driver: PNS_Driver,
     ready_client: rclpy.client.Client,
     node: rclpy.node.Node,
 ) -> str:
@@ -276,7 +276,7 @@ if __name__ == "__main__":
     executor = ThreadPoolExecutor(max_workers=5)
 
     # spin required for subscriptions to work
-    future = Future()
+    future: Future = Future()
     spin_thread = threading.Thread(
         target=rclpy.spin_until_future_complete, args=(node, future), daemon=True
     )
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     for i, action in enumerate(actions):
         node.get_logger().info(f"Executing action {i+1}/{len(actions)}")
 
-        log_file.write(handle_action(action, ms, cm, ready_client, node))
+        log_file.write(handle_action(action, ms, cm, driver, ready_client, node))
 
         node.get_logger().info(f"Finished action {i+1}/{len(actions)}")
 
@@ -357,7 +357,7 @@ if __name__ == "__main__":
     #             f"Executing close-up action {k+1}/{len(rotated_actions)}"
     #         )
 
-    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
+    #         log_file.write(handle_action(action, ms, cm, driver, ready_client, node))
 
     #         node.get_logger().info(
     #             f"Finished close-up action {k+1}/{len(rotated_actions)}"
@@ -368,7 +368,7 @@ if __name__ == "__main__":
     #         continue
 
     #     _pose = min(node.poses, key=lambda p: abs(p.pose.z))
-        
+
     #     close_berry_loc = [
     #         _pose.pose.x,
     #         _pose.pose.y,
@@ -389,7 +389,7 @@ if __name__ == "__main__":
     #     for k, action in enumerate(pick_actions):
     #         node.get_logger().info(f"Executing action {k+1}/{len(pick_actions)}")
 
-    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
+    #         log_file.write(handle_action(action, ms, cm, driver, ready_client, node))
 
     #         node.get_logger().info(f"Finished action {k+1}/{len(pick_actions)}")
 
@@ -405,14 +405,14 @@ if __name__ == "__main__":
     #     for k, action in enumerate(drop_actions):
     #         node.get_logger().info(f"Executing action {k+1}/{len(drop_actions)}")
 
-    #         log_file.write(handle_action(action, ms, cm, ready_client, node))
+    #         log_file.write(handle_action(action, ms, cm, driver, ready_client, node))
 
     #         node.get_logger().info(f"Finished action {k+1}/{len(drop_actions)}")
 
     #     node.get_logger().info(f"Finished berry {j+1}/{len(orig_berry_locs)}")
 
     #     if j < len(orig_berry_locs) - 1:
-    #         log_file.write(handle_action(OBSERVE_ACT, ms, cm, ready_client, node))
+    #         log_file.write(handle_action(OBSERVE_ACT, ms, cm, driver, ready_client, node))
 
     # # END BERRY SEQUENCE
 
