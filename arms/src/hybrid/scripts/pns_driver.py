@@ -407,7 +407,7 @@ class PNS_Driver:
                                     f"Fruit classification changed from {self.fruit_state} to {new_fruit_state}"
                                 )
                                 reached_class_time = time.time()
-                            
+
                             self.fruit_state = new_fruit_state
 
                         bucket.k = k
@@ -539,6 +539,5 @@ class PNS_Driver:
             duration = time.time() - loop_start_time
             if duration < PERIOD:
                 time.sleep(PERIOD - duration)
-
 
         self.data.save()
