@@ -2,7 +2,7 @@
 ORIGIN_X = -243.60 + 204.18592  # mm
 ORIGIN_Y = 295.76 + 37.08883  # mm
 # ORIGIN_Z = 288.27  # mm
-ORIGIN_Z = 263.27  # mm
+ORIGIN_Z = 248.27  # mm
 
 # coords measured from center of power button, pos x is left, pos y is down
 ROW1_Y = -18.74441  # mm

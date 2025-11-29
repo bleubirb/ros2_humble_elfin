@@ -8,7 +8,7 @@ import numpy as np
 import sympy as sp
 from scipy.spatial.transform import Rotation
 
-DISABLE_LOGGING = False
+DISABLE_LOGGING = True
 
 
 class bcolors:
@@ -179,7 +179,7 @@ class MoveSolver:
         drag_joints = np.array(
             [(j - 2 * np.pi) if j > np.pi else j for j in drag_joints], dtype=float
         )
-        drag_joints = np.round(drag_joints, 2)
+        drag_joints = np.round(drag_joints, 4)
         self.log(
             f"Pose re-mapped to [-pi, pi] range: {'' if retry else bcolors.OKGREEN} {drag_joints} {'' if retry else bcolors.ENDC}"
         )

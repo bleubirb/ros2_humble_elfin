@@ -65,7 +65,7 @@ class CmdMove(object):
 
         # self.log(f"Received joint state: {self.joint_state}")
 
-    def dance(self, joints):
+    def dance(self, joints, atol=1e-1) -> bool:
         self.log(f"Attempted joint state: {joints}")
         joints = np.mod(joints, 2 * np.pi)
         joints = np.array([(j - 2 * np.pi) if j > np.pi else j for j in joints])
@@ -84,11 +84,12 @@ class CmdMove(object):
         js.header.stamp = self.node.get_clock().now().to_msg()
         # time.sleep(0.5)
         self.joints_pub.publish(js)
+        self.joint_state = None  # reset joint state to wait for new update
         count = 0
         while count < 1000:
             if self.joint_state is not None:
                 joint_state_np = np.array(self.joint_state)
-                if np.allclose(joint_state_np, joints, atol=1e-1):
+                if np.allclose(joint_state_np, joints, atol=atol):
                     self.log("Goal reached")
                     return True
                 else:
@@ -99,5 +100,4 @@ class CmdMove(object):
                     count += 1
 
             time.sleep(0.01)
-        # time.sleep(0.5)
         return False

@@ -98,7 +98,6 @@ def handle_action(
     action: JointAction,
     ms: MoveSolver,
     cm: CmdMove,
-    # driver: PNS_Driver,
     node: rclpy.node.Node,
 ) -> str:
     log_str = ""
@@ -127,9 +126,12 @@ def handle_action(
         
         if action.raised is not None and action.letter is not None:
             if action.raised:
+                node.get_logger().info(f"Approaching/leaving character {action.letter}!")
                 raised_actions[action.letter] = joints
             else:
+                node.get_logger().info(f"Typing character {action.letter}!")
                 lowered_actions[action.letter] = joints
+            
             # save to json
             with open(json_path, "w") as f:
                 json.dump(
@@ -144,23 +146,10 @@ def handle_action(
             return log_str
 
         # execute the joint action
-        cm.dance(joints)
+        cm.dance(joints, atol=5e-3 if action.raised else 1e-1)
 
-        # time.sleep(2)  # delay between motions
-    # elif action.action == Action.GRIP:  # GRIP action
-    #     node.get_logger().info(f"Setting desired force to {action.force} for {i+1}")
-    #     log_str = f"{time.time()},{Action.GRIP},{','.join(['0']*6)},{action.force},1\n"
-
-    #     driver.set_fd(action.force)
-
-    #     count = 0
-    #     while not driver.get_done():
-    #         if count % 10 == 0:
-    #             node.get_logger().info(
-    #                 f"Waiting for gripper to reach desired force for {i+1}"
-    #             )
-    #         count += 1
-    #         time.sleep(0.5)
+        if action.raised:
+            time.sleep(0.2)  # wait a bit when approaching/leaving
 
     return log_str
 
@@ -173,7 +162,6 @@ if __name__ == "__main__":
 
     ms = MoveSolver(node)
     cm = CmdMove(node, ms)
-    # driver = PNS_Driver(node, ip, port)
     executor = ThreadPoolExecutor(max_workers=5)
 
     # spin required for subscriptions to work
@@ -193,21 +181,14 @@ if __name__ == "__main__":
     log_file = open(f"data/keyboard_state_{f_idx}.csv", "w", encoding="utf-8")
     log_file.write("Time,State,X,Y,Z,RX,RY,RZ,F,Valid\n")
 
-    # # close gripper on a stylus
-    # node.get_logger().info("Gripping...")
-
-    # log_file.write(
-    #     handle_action(JointAction(Action.GRIP, force=0.5), ms, cm, driver, node)
-    # )
-
-    # node.get_logger().info("Reached grip!")
-
     # state to track caps lock
     caps_state = False
 
     while True:
         # get text input
         text = input("Enter text to type: ")
+        if "$exit$" in text:
+            break
         actions = []
 
         for char in text:
@@ -241,7 +222,6 @@ if __name__ == "__main__":
     executor.shutdown(wait=True)
     log_file.close()
     node.get_logger().info(f"Data saved to data/keyboard_state_{f_idx}.csv")
-    # driver.stop()
     node.get_logger().info("It worked!\n")
 
     # cleanup
