@@ -79,6 +79,10 @@ class JointAction:
     executor: ThreadPoolExecutor | None = None
     future: Future | None = None
 
+    letter: str | None = None
+    raised: bool | None = None
+    joints: list[float] | None = None
+
     def __post_init__(self):
         if self.action == Action.MOVE:
             if (self.position is None or self.orientation is None) and not (

@@ -82,7 +82,7 @@ class CmdMove(object):
         ]
         js.position = [float(j) for j in joints]
         js.header.stamp = self.node.get_clock().now().to_msg()
-        time.sleep(0.5)
+        # time.sleep(0.5)
         self.joints_pub.publish(js)
         count = 0
         while count < 1000:
@@ -98,5 +98,6 @@ class CmdMove(object):
                         # self.log(f"Target joint state: {joints}")
                     count += 1
 
-            time.sleep(0.1)
+            time.sleep(0.01)
+        # time.sleep(0.5)
         return False

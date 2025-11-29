@@ -33,6 +33,7 @@ install(
   scripts/pns_driver.py
   scripts/keyboard_control.py
   scripts/letters.py
+  scripts/free_driver.py
   DESTINATION
   lib/${PROJECT_NAME})
 
