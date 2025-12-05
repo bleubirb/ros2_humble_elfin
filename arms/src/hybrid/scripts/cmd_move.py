@@ -85,20 +85,6 @@ class CmdMove(Node):
             self.pose_solver_client.call_async(self.pose_solver_request)
         )
 
-        # if response is not None:
-        #     self.get_logger().info(f"Got response: {response}")
-
-        #     pose_msg = Pose()
-        #     pose_msg.position = response.position
-        #     pose_msg.orientation = response.orientation
-        #     self.pose_pub.publish(pose_msg)
-
-        #     self.get_logger().info(f"Published pose: {pose_msg}")
-
-        #     # self.log(f"Received joint state: {self.joint_state}")
-        # else:
-        #     self.log("Pose service call failed")
-
     def dance_callback(self, data: PosOri):
         self.get_logger().info(f"Received dance command: {data}")
 
@@ -109,27 +95,10 @@ class CmdMove(Node):
 
         future = self.move_solver_client.call_async(self.move_solver_request)
         self.solver_futures.append(future)
-        # rclpy.spin_until_future_complete(self, future)
-
-        # if future.result() is not None:
-        #     response: MoveRequest.Response = future.result()
-        #     self.log(
-        #         f"Move solver response: valid={response.valid}, joints={response.joints}"
-        #     )
-        #     if response.valid:
-        #         success = self.move_to_joints(response.joints)
-        #         if success:
-        #             self.log("Movement successful")
-        #         else:
-        #             self.log("Movement failed: could not reach goal")
-        #     else:
-        #         self.log("Movement failed: invalid joint solution")
-        # else:
-        #     self.log("Service call failed")
 
     def spin(self):
         while rclpy.ok():
-            rclpy.spin_once(self)
+            rclpy.spin_once(self, timeout_sec=0.1)
             incomplete_pose_futures = []
             for f in self.pose_futures:
                 if f.done():
@@ -204,12 +173,9 @@ def main():
 
     cmd_move = CmdMove()
 
-    # rclpy.spin(cmd_move)
-    # while rclpy.ok():
-    #     rclpy.spin_once(cmd_move, timeout_sec=0.1)
-
     cmd_move.spin()
 
+    cmd_move.destroy_node()
     rclpy.shutdown()
 
 

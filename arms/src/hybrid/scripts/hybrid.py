@@ -50,7 +50,7 @@ class Hybrid(Node):
         self.get_logger().info(f"Sent dance command: {msg}")
 
         while self.position is None or self.orientation is None:
-            rclpy.spin_once(self, timeout_sec=0.1)
+            time.sleep(0.1)
 
         self.get_logger().info("Waiting for robot to reach target pose...")
 
@@ -63,7 +63,7 @@ class Hybrid(Node):
             [msg.orientation.x, msg.orientation.y, msg.orientation.z],
             atol=2.0,
         ):
-            rclpy.spin_once(self, timeout_sec=0.1)
+            time.sleep(0.1)
 
         self.get_logger().info("Robot reached target pose.")
 
@@ -109,8 +109,11 @@ def main():
     dance_msg.orientation.z = DROP_ROT.z
     hybrid.send_dance_command(dance_msg)
 
+    hybrid.get_logger().info("Dance sequence complete. Shutting down.")
+
     future.set_result(True)
     spin_thread.join()
+    hybrid.destroy_node()
     rclpy.shutdown()
 
 
