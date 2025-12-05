@@ -65,7 +65,7 @@ class Vision:
         )
 
         self.pose_sub: Subscription = node.create_subscription(
-            Pose, "/hybrid/robot_pose", self.store_robot_pose, 1
+            Pose, "/cmd_move/robot_pose", self.store_robot_pose, 1
         )
         self.robot_pose: Pose | None = None
 

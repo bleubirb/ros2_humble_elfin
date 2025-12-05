@@ -3,10 +3,13 @@
 
 import os.path
 
-import matplotlib.pyplot as plt
 import numpy as np
+import rclpy
 import sympy as sp
+from rclpy.node import Node
 from scipy.spatial.transform import Rotation
+
+from hybrid_msgs.srv import MoveRequest, PoseRequest
 
 DISABLE_LOGGING = False
 
@@ -40,7 +43,7 @@ DH_d = [
     0.155 + (0.219 / 2 if END_EFFECTOR_ATTACHED else 0),
 ]  # link offsets in meters (half the last link length)
 
-Kp_pos = 10.0 # proportional gain for position
+Kp_pos = 0.4  # proportional gain for position
 Kd_pos = 0.1  # derivative gain for position
 
 Kp_rot = np.deg2rad(10.0)  # rotational proportional gain
@@ -50,9 +53,9 @@ pos_tolerance = 1e-6
 rot_tolerance = 1e-3
 
 
-class MoveSolver:
-    def __init__(self, node):
-        self.node = node
+class MoveSolver(Node):
+    def __init__(self):
+        super().__init__("move_solver")
 
         # Joint angles (theta_i) - all are variables
         self.theta1, self.theta2, self.theta3, self.theta4, self.theta5, self.theta6 = (
@@ -80,9 +83,16 @@ class MoveSolver:
 
         self.calc_jacobian()
 
-    def log(self, message):
+        self.srv = self.create_service(MoveRequest, "move_solver", self.move_callback)
+        self.pose_srv = self.create_service(
+            PoseRequest, "pose_solver", self.pose_callback
+        )
+
+        self.get_logger().info("MoveSolver node initialized.")
+
+    def log(self, message: str):
         if not DISABLE_LOGGING:
-            self.node.get_logger().info(message)
+            self.get_logger().info(message)
 
     def calc_jacobian(self):
         for i in range(6):
@@ -140,7 +150,7 @@ class MoveSolver:
         # Combine Jacobian components
         self.J = sp.Matrix.vstack(self.Jv, self.Jw)
 
-    def pose_from_joints(self, joints):
+    def pose_from_joints(self, joints: list[float]):
         joints = np.array(joints, dtype=float)
         position = np.array(
             self.p.subs(
@@ -173,7 +183,13 @@ class MoveSolver:
         orientation = np.round(orientation, 4)
         return position.tolist(), orientation.tolist()
 
-    def check_pose(self, drag_joints, target_pose, target_orientation, retry=False):
+    def check_pose(
+        self,
+        drag_joints: list[float],
+        target_pose: list[float],
+        target_orientation: list[float],
+        retry=False,
+    ):
         self.log(f"Checking pose: {drag_joints}")
         drag_joints = np.mod(drag_joints, 2 * np.pi)
         drag_joints = np.array(
@@ -281,8 +297,13 @@ class MoveSolver:
         # position 5 == target position
 
     def compute(
-        self, target_pose, target_orientation, starting_joint_state, retry=False
-    ) -> list[float]:
+        self,
+        target_pose: list[float],
+        target_orientation: list[float],
+        starting_joint_state: list[float],
+        retry: bool = False,
+    ) -> tuple[bool, list[float]]:
+
         theta_vals = np.array(starting_joint_state, dtype=float)
         target_pose = np.array(target_pose, dtype=float)
         target_orientation = np.array(target_orientation, dtype=float)
@@ -311,6 +332,9 @@ class MoveSolver:
                 ),
                 dtype=float,
             ).flatten()  # flatten to convert from 3x1 matrix to 1D array
+
+            # self.log(f"Current Position: {current_position}")
+
             current_orientation = np.array(
                 self.R.subs(
                     [
@@ -422,12 +446,46 @@ class MoveSolver:
         self.log(f"{'Valid' if valid else 'Invalid'} pose: {theta_vals}")
         return valid, theta_vals.tolist()
 
-    def move(
-        self,
-        position: list[float],
-        orientation: list[float],
-        starting_joint_state: list[float],
+    def pose_callback(
+        self, request: PoseRequest.Request, response: PoseRequest.Response
     ):
+        joints: list[float] = request.joints
+
+        # self.get_logger().info(f"Received pose request for joints: {joints}")
+
+        position, orientation = self.pose_from_joints(joints)
+
+        response.location.position.x = position[0]
+        response.location.position.y = position[1]
+        response.location.position.z = position[2]
+        response.location.orientation.x = orientation[0]
+        response.location.orientation.y = orientation[1]
+        response.location.orientation.z = orientation[2]
+        response.location.orientation.w = orientation[3]
+
+        # self.get_logger().info(
+        #     f"Computed pose: Position - {position}, Orientation (quaternion) - {orientation}"
+        # )
+
+        return response
+
+    def move_callback(
+        self,
+        request: MoveRequest.Request,
+        response: MoveRequest.Response,
+    ):
+        position: list[float] = [
+            request.location.position.x,
+            request.location.position.y,
+            request.location.position.z,
+        ]
+        orientation: list[float] = [
+            request.location.orientation.x,
+            request.location.orientation.y,
+            request.location.orientation.z,
+        ]
+        starting_joint_state: list[float] = request.starting_joint_state
+
         if position is None:
             return True, [0, 0, 0, 0, 0, 0]
         elif (
@@ -470,106 +528,26 @@ class MoveSolver:
         self.log(f"Position error: {pos_error}")
         self.log(f"Orientation error (rad): {theta_error}")
 
-        valid = valid and pos_error < 0.01 and theta_error < 0.1
+        valid = bool(valid and pos_error < 0.01 and theta_error < 0.1)
         self.log(
             f"Move validity: {f'{bcolors.OKGREEN}Valid' if valid else f'{bcolors.FAIL}Invalid'}{bcolors.ENDC}"
         )
 
-        return valid, joints
+        response.valid = valid
+        response.joints = joints
 
-    def plot(self, joints, target_position, target_orientation):
-        vals = [
-            np.array(
-                self.T[i].subs(
-                    [
-                        (self.theta1, joints[0]),
-                        (self.theta2, joints[1]),
-                        (self.theta3, joints[2]),
-                        (self.theta4, joints[3]),
-                        (self.theta5, joints[4]),
-                        (self.theta6, joints[5]),
-                    ]
-                ),
-                dtype=float,
-            )
-            for i in range(6)
-        ]
+        return response
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection="3d")
 
-        # Plot links with different colors
-        ax.plot(
-            [0, vals[0][0, 3]],
-            [0, vals[0][1, 3]],
-            [0, vals[0][2, 3]],
-            "b-",
-            linewidth=2,
-        )
-        ax.plot(
-            [vals[0][0, 3], vals[1][0, 3]],
-            [vals[0][1, 3], vals[1][1, 3]],
-            [vals[0][2, 3], vals[1][2, 3]],
-            "r-",
-            linewidth=2,
-        )
-        ax.plot(
-            [vals[1][0, 3], vals[2][0, 3]],
-            [vals[1][1, 3], vals[2][1, 3]],
-            [vals[1][2, 3], vals[2][2, 3]],
-            "g-",
-            linewidth=2,
-        )
-        ax.plot(
-            [vals[2][0, 3], vals[3][0, 3]],
-            [vals[2][1, 3], vals[3][1, 3]],
-            [vals[2][2, 3], vals[3][2, 3]],
-            "c-",
-            linewidth=2,
-        )
-        ax.plot(
-            [vals[3][0, 3], vals[4][0, 3]],
-            [vals[3][1, 3], vals[4][1, 3]],
-            [vals[3][2, 3], vals[4][2, 3]],
-            "m-",
-            linewidth=2,
-        )
-        ax.plot(
-            [vals[4][0, 3], vals[5][0, 3]],
-            [vals[4][1, 3], vals[5][1, 3]],
-            [vals[4][2, 3], vals[5][2, 3]],
-            "y-",
-            linewidth=2,
-        )
+def main():
+    rclpy.init()
 
-        ax.plot(
-            target_position[0],
-            target_position[1],
-            target_position[2],
-            "rx",
-            markersize=12,
-            linewidth=2,
-        )
+    move_solver = MoveSolver()
 
-        target_orientation = Rotation.from_euler(
-            "xyz", target_orientation, degrees=True
-        ).as_matrix()
-        v = np.dot(target_orientation, np.array([[0, 0, 1]]).T)
-        ax.quiver(
-            target_position[0],
-            target_position[1],
-            target_position[2],
-            v[0],
-            v[1],
-            v[2],
-            color="r",
-            length=0.3,
-        )
+    rclpy.spin(move_solver)
 
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")  # type: ignore
-        ax.set_xlim(-0.75, 0.75)
-        ax.set_ylim(-0.75, 0.75)
-        ax.set_zlim(0, 1.5)  # type: ignore
-        plt.show()
+    rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

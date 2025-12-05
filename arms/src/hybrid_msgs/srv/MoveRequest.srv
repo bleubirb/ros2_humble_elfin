@@ -1,0 +1,5 @@
+PosOri location
+float64[] starting_joint_state
+---
+bool valid
+float64[] joints

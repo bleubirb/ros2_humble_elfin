@@ -1,0 +1,3 @@
+float64[] joints
+---
+geometry_msgs/Pose location
