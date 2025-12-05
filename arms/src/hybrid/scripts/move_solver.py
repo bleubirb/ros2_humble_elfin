@@ -40,7 +40,7 @@ DH_d = [
     0.155 + (0.219 / 2 if END_EFFECTOR_ATTACHED else 0),
 ]  # link offsets in meters (half the last link length)
 
-Kp_pos = 0.4  # proportional gain for position
+Kp_pos = 10.0 # proportional gain for position
 Kd_pos = 0.1  # derivative gain for position
 
 Kp_rot = np.deg2rad(10.0)  # rotational proportional gain
