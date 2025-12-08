@@ -7,7 +7,7 @@ from statistics import mean
 
 import numpy as np
 import rclpy
-from helpers import DataBucket, DataRecorder
+# from helpers import DataBucket, DataRecorder
 from onrobot_rg2ft_control.OnRobotRG2FT import OnRobotRG2FT
 from onrobot_rg2ft_msgs.msg import RG2FTCommand, RG2FTState
 
@@ -18,7 +18,8 @@ FORCE_SCALE = 1.0
 CONTACT_REQUIRED = 3
 MAX_ERROR_RATIO = 0.5  # reject updates with error > 50% of force
 THRESHOLD_UNRIPE = 0.06
-THRESHOLD_OVERRIPE = 0.015
+# THRESHOLD_OVERRIPE = 0.015 # for blueberries
+THRESHOLD_OVERRIPE = 0.01 # for blackberries
 MIN_BERRY_WIDTH = 50  # mm, min width to consider for berry
 MAX_BERRY_WIDTH = 220  # mm, max width to consider for berry
 MIN_WIDTH_EXIT_LOOPS = 5  # number of loops with width below min to exit force control
@@ -55,7 +56,7 @@ class PNS_Driver:
         self.thread = threading.Thread(target=self.loop)
         self.thread.start()
 
-        self.data = DataRecorder(self.node)
+        # self.data = DataRecorder(self.node)
 
     def log(self, message):
         if not DISABLE_PNS_LOGGING:
@@ -261,7 +262,7 @@ class PNS_Driver:
             loop_start_time = time.time()
             state = self.gripper.readState()
 
-            bucket = DataBucket(time=loop_start_time, cmd_width=last_target)
+            # bucket = DataBucket(time=loop_start_time, cmd_width=last_target)
 
             if self.fd != desired_force:
                 desired_force = self.fd
@@ -270,7 +271,7 @@ class PNS_Driver:
                 self.fruit_state = "unclassified"
                 self.rls_initialized = False
 
-            bucket.fd = desired_force
+            # bucket.fd = desired_force
 
             cmd = RG2FTCommand()
             tmp_width = last_target  # mm
@@ -289,12 +290,12 @@ class PNS_Driver:
             ProxL = mean(prox_l_range)
             ProxR = mean(prox_r_range)
             width = mean(width_range)
-            bucket.width = width
+            # bucket.width = width
 
             ProxAvg = (
                 ProxL + ProxR
             ) / 2  # divide by two due to width between two fingers (find midpoint)
-            bucket.prox = ProxAvg
+            # bucket.prox = ProxAvg
 
             if (
                 mean([state.proximity_value_l, state.proximity_value_r]) - last_prox
@@ -322,15 +323,15 @@ class PNS_Driver:
                 delay_start_time = time.time()
 
                 while time.time() - delay_start_time < 5:
-                    tmp_bucket = DataBucket(
-                        time=time.time(),
-                        fd=desired_force,
-                        state=q,
-                        width=width,
-                        cmd_width=last_target,
-                        prox=ProxAvg,
-                    )
-                    self.data.record(tmp_bucket)
+                    # tmp_bucket = DataBucket(
+                    #     time=time.time(),
+                    #     fd=desired_force,
+                    #     state=q,
+                    #     width=width,
+                    #     cmd_width=last_target,
+                    #     prox=ProxAvg,
+                    # )
+                    # self.data.record(tmp_bucket)
 
                     time.sleep(PERIOD)
 
@@ -348,8 +349,8 @@ class PNS_Driver:
             l_force_raw = abs(state.fz_l)
             r_force_raw = abs(state.fz_r)
 
-            bucket.raw_fz_l = l_force_raw
-            bucket.raw_fz_r = r_force_raw
+            # bucket.raw_fz_l = l_force_raw
+            # bucket.raw_fz_r = r_force_raw
 
             force = (l_force_raw + r_force_raw) / 2 / 10
 
@@ -357,7 +358,7 @@ class PNS_Driver:
             if len(force_range) > MOVING_AVG_LEN_FORCE:
                 force_range.pop(0)
             force_avg = mean(force_range)
-            bucket.force = force_avg
+            # bucket.force = force_avg
 
             force_error = desired_force - force_avg
 
@@ -410,11 +411,11 @@ class PNS_Driver:
 
                             self.fruit_state = new_fruit_state
 
-                        bucket.k = k
-                        bucket.F_pred = F_pred
-                        bucket.rls_error = error
-                        bucket.baseline_w = self.x0 if self.x0 is not None else 0.0
-                        bucket.classification = self.fruit_state
+                        # bucket.k = k
+                        # bucket.F_pred = F_pred
+                        # bucket.rls_error = error
+                        # bucket.baseline_w = self.x0 if self.x0 is not None else 0.0
+                        # bucket.classification = self.fruit_state
                         if k is None:
                             self.log("Estimated spring constant: unknown")
                         else:
@@ -430,7 +431,7 @@ class PNS_Driver:
                     else:
                         min_width_exit_counter = 0
 
-                bucket.state = q
+                # bucket.state = q
 
                 if q == HOLD:
                     pass
@@ -454,12 +455,12 @@ class PNS_Driver:
                     f"prox: {ProxAvg:.2f}, target width: {tmp_width:.2f}, current force: {force_avg:.2f}, force: {force:.2f}, q state: {q}, raw fz_l: {l_force_raw:.2f}, raw fz_r: {r_force_raw:.2f}"
                 )
 
-            bucket.hold_time = (
-                reached_class_time if reached_class_time != float("inf") else 0
-            )
+            # bucket.hold_time = (
+            #     reached_class_time if reached_class_time != float("inf") else 0
+            # )
 
-            if calibrated:
-                self.data.record(bucket)
+            # if calibrated:
+            #     self.data.record(bucket)
 
             cmd.target_width = int(round(tmp_width))
 
@@ -540,4 +541,4 @@ class PNS_Driver:
             if duration < PERIOD:
                 time.sleep(PERIOD - duration)
 
-        self.data.save()
+        # self.data.save()

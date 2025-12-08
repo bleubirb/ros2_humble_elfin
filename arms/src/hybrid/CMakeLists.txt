@@ -31,6 +31,7 @@ install(
   scripts/move_solver.py
   scripts/cmd_move.py
   scripts/pns_driver.py
+  scripts/grip_test.py
   DESTINATION
   lib/${PROJECT_NAME})
 
