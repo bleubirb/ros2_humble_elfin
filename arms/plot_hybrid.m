@@ -22,7 +22,7 @@ data = {
     % "Ball", 89, 101, NaN, NaN, true;
     % "Ball, 3N to 1N, Hysteresis", 106, 144, true;
     % "Ball, 3N to 1N, Hysteresis", 112, 159, true;
-    % "Temperature", 94, 115, true;
+    "Temperature", 94, 115, true;
     % "Squeeze", 145, 168, true;
     % "Fill", 146, 169, true;
     % "Rotation", 134, 156, true;
@@ -35,7 +35,7 @@ data = {
     % "Move Test 2", 182, 208, false;
     % "Move Test 3", 183, 209, false;
     % "Move Test 4", 184, 210, false;
-    "Move Test 7", 188, 214, false;
+    % "Move Test 7", 188, 214, false;
     };
 
 % Iterate over data
@@ -118,7 +118,7 @@ for idx = 1:size(data, 1)
         ylabel('State');
     yticks([-1, 0, 1, 2]);
     yticklabels({'L', 'H', 'T', 'M'});
-        xlim([9, 120]);
+        xlim([9, 1800]);
         % title(sprintf('%s - Gripper State', title));
     end
 
@@ -153,8 +153,8 @@ for idx = 1:size(data, 1)
         end
         xlabel('Time (s)');
         ylabel('Force (N)');
-        ylim([-1, 3]);
-        xlim([9, 120]);
+        ylim([0, 4]);
+        xlim([9, 1800]);
         % title(sprintf('%s - Gripper Force', title));
     end
 
